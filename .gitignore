@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env*
+*.xlsx
+*.xls
+*.csv
+*.tsv
+scripts/validate-local.ts
+!package-lock.json
