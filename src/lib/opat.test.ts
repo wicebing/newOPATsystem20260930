@@ -73,5 +73,35 @@ describe('OPAT calculation', () => {
     ] }]);
     expect(courseStatus(data.courses[0], new Date(2026, 7, 1))).toBe('待施行');
     expect(courseStatus(data.courses[0], new Date(2026, 7, 4))).toBe('未執行');
+    expect(data.months).toContain('2026-08');
+  });
+
+  it('pairs each injection time with the corresponding executor', () => {
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ 頻率: 'Q12H', 執行次數: 2,
+        執行次數明細: '2026/07/23 09:00, 2026/07/23 21:00',
+        執行人員明細: 'G00001王甲乙, G00002李丙丁' }),
+    ] }]);
+    expect(data.executions.map(event => [event.executorId, event.executorName])).toEqual([
+      ['G00001', '王甲乙'], ['G00002', '李丙丁'],
+    ]);
+    expect(data.issues.some(issue => issue.code === 'executor-mismatch')).toBe(false);
+  });
+
+  it('flags execution times that cannot be mapped to an executor', () => {
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ 執行人員明細: '' }),
+    ] }]);
+    expect(data.executions[0].executorId).toBe('');
+    expect(data.issues.some(issue => issue.code === 'executor-mismatch')).toBe(true);
+  });
+
+  it('flags conflicting executors on a duplicate administration', () => {
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ 執行人員明細: 'G00001王甲乙' }),
+      row({ 執行人員明細: 'G00002李丙丁' }),
+    ] }]);
+    expect(data.executions).toHaveLength(1);
+    expect(data.issues.some(issue => issue.code === 'executor-conflict')).toBe(true);
   });
 });

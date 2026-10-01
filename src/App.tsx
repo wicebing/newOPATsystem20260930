@@ -3,23 +3,26 @@ import type { ChangeEvent, DragEvent, ReactNode } from 'react';
 import {
   Activity, AlertTriangle, ArrowDownToLine, Check, ChevronDown, ClipboardList,
   FileSpreadsheet, Filter, FolderOpen, LayoutDashboard, Pill, Plus, Search,
-  ShieldCheck, Stethoscope, Trash2, UploadCloud, Users, X,
+  ShieldCheck, Stethoscope, Trash2, Users, X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Legend,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
   analyze, CAMPUSES, courseStatus, formatDate, performance, POINTS, reportingMonth,
 } from './lib/opat';
 import type { Analysis, Campus, DataIssue } from './lib/opat';
+import { buildCompletion, summarizeCompletion } from './lib/completion';
+import { executorKey, groupExecutors } from './lib/staff';
 
-type View = 'overview' | 'execution' | 'performance' | 'cases' | 'audit';
+type View = 'overview' | 'execution' | 'staff' | 'performance' | 'cases' | 'audit';
 const COLORS = ['#087c72', '#e57443', '#8b65a3', '#d6a637', '#5c92b3', '#9ba8a4'];
 const NAV: { id: View; label: string; icon: LucideIcon }[] = [
   { id: 'overview', label: '總覽', icon: LayoutDashboard },
   { id: 'execution', label: '執行分析', icon: Activity },
+  { id: 'staff', label: '執行人員', icon: Users },
   { id: 'performance', label: '績效點數', icon: ClipboardList },
   { id: 'cases', label: '個案明細', icon: Users },
   { id: 'audit', label: '資料檢核', icon: ShieldCheck },
@@ -27,6 +30,10 @@ const NAV: { id: View; label: string; icon: LucideIcon }[] = [
 
 function number(value: number, decimals = 0) {
   return value.toLocaleString('zh-TW', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+function percentage(value: number | null): string {
+  return value === null ? '—' : `${number(value * 100, 1)}%`;
 }
 
 function statLine(label: string, value: string | number, accent: string, icon: LucideIcon) {
@@ -53,12 +60,15 @@ function TooltipContent({ active, payload, label }: { active?: boolean; payload?
   return <div className="chart-tooltip"><strong>{label}</strong>{payload.map((entry, index) => <span key={index} style={{ color: entry.color }}>{entry.name}　{number(Number(entry.value || 0))}</span>)}</div>;
 }
 
-function EmptyState({ onChoose, onDrop }: { onChoose: () => void; onDrop: (event: DragEvent<HTMLDivElement>) => void }) {
+function EmptyState({ fileCount, onChoose, onAnalyze, onDrop }: { fileCount: number; onChoose: () => void; onAnalyze: () => void; onDrop: (event: DragEvent<HTMLDivElement>) => void }) {
   return <div className="empty-state" onDragOver={event => event.preventDefault()} onDrop={onDrop}>
     <div className="empty-icon"><FileSpreadsheet size={32} strokeWidth={1.5} /></div>
-    <h2>匯入 OPAT 個案資料</h2>
-    <p>可同時選取 g、h 原始 Excel 檔；院區與多檔資料會自動整合。</p>
-    <button className="primary-button" onClick={onChoose}><FolderOpen size={18} /> 選擇 Excel 檔案</button>
+    <h2>{fileCount ? `已加入 ${fileCount} 個 Excel 檔案` : '匯入 OPAT 個案資料'}</h2>
+    <p>{fileCount ? '可繼續加入檔案；分析時會自動整合所有檔案。' : '可逐次加入 g、h 原始 Excel 檔；院區與多檔資料會自動整合。'}</p>
+    <div className="empty-actions">
+      <button className={fileCount ? 'button ghost' : 'primary-button'} onClick={onChoose}><FolderOpen size={18} /> {fileCount ? '繼續加入檔案' : '選擇 Excel 檔案'}</button>
+      {fileCount > 0 && <button className="primary-button" onClick={onAnalyze}><Activity size={18} /> 開始分析</button>}
+    </div>
     <span className="empty-note">.xlsx / .xls　資料只在此瀏覽器處理</span>
   </div>;
 }
@@ -74,27 +84,26 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [issueFilter, setIssueFilter] = useState('all');
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const [selectedExecutorKey, setSelectedExecutorKey] = useState<string | null>(null);
+  const [executorPage, setExecutorPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
 
-  const process = async (nextFiles: File[]) => {
-    setFiles(nextFiles);
-    if (!nextFiles.length) {
-      setData(null);
-      setError('');
-      return;
-    }
+  const process = async () => {
+    if (busy || !files.length) return;
     setBusy(true);
     setError('');
     try {
       const { readExcelFiles } = await import('./lib/excel');
-      const result = analyze(await readExcelFiles(nextFiles));
+      const result = analyze(await readExcelFiles(files));
       setData(result);
       setIncludedCodes(new Set(result.drugCatalog.filter(drug => drug.kind === 'injectable-antibiotic').map(drug => drug.code)));
       setMonth(result.months.at(-1) || 'all');
       setIssueFilter('all');
       setSelectedCourseId(null);
+      setSelectedExecutorKey(null);
+      setExecutorPage(1);
       setSearch('');
       setPage(1);
     } catch (cause) {
@@ -106,13 +115,35 @@ export default function App() {
   };
 
   const addFiles = (incoming: File[]) => {
-    const next = [...files];
-    incoming.forEach(file => {
-      const index = next.findIndex(existing => existing.name === file.name && existing.size === file.size);
-      if (index >= 0) next[index] = file;
-      else next.push(file);
+    if (busy || !incoming.length) return;
+    setFiles(previous => {
+      const next = [...previous];
+      incoming.forEach(file => {
+        const index = next.findIndex(existing => existing.name === file.name && existing.size === file.size);
+        if (index >= 0) next[index] = file;
+        else next.push(file);
+      });
+      return next;
     });
-    void process(next);
+    setData(null);
+    setError('');
+    setSelectedCourseId(null);
+  };
+
+  const removeFile = (index: number) => {
+    if (busy) return;
+    setFiles(previous => previous.filter((_, current) => current !== index));
+    setData(null);
+    setError('');
+    setSelectedCourseId(null);
+  };
+
+  const clearFiles = () => {
+    if (busy) return;
+    setFiles([]);
+    setData(null);
+    setError('');
+    setSelectedCourseId(null);
   };
 
   const onInput = (event: ChangeEvent<HTMLInputElement>) => {
@@ -137,6 +168,41 @@ export default function App() {
   const events = useMemo(() => data?.executions.filter(event =>
     includedCodes.has(event.drugCode) && (month === 'all' || event.month === month) && (campus === '全部院區' || event.campus === campus),
   ) || [], [data, month, campus, includedCodes]);
+  const completion = useMemo(() => data ? buildCompletion(data, includedCodes) : null, [data, includedCodes]);
+  const completionSummary = useMemo(() => completion ? summarizeCompletion(completion, month, campus) : null, [completion, month, campus]);
+  const completionByCampus = useMemo(() => completion ? CAMPUSES.map(name => ({ name, ...summarizeCompletion(completion, month, name) })) : [], [completion, month]);
+  const progressByCourse = useMemo(() => new Map(completion?.courses.map(item => [item.courseId, item]) || []), [completion]);
+  const completionByDrug = useMemo(() => {
+    const groups = new Map<string, { name: string; expected: number; executed: number }>();
+    completion?.days.filter(day => (month === 'all' || day.date.startsWith(month)) && (campus === '全部院區' || day.campus === campus)).forEach(day => {
+      const current = groups.get(day.drugCode) || { name: day.drugName, expected: 0, executed: 0 };
+      current.expected += day.expected;
+      current.executed += day.executed;
+      groups.set(day.drugCode, current);
+    });
+    return [...groups.entries()].map(([code, result]) => ({ code, ...result })).sort((a, b) => b.expected - a.expected);
+  }, [completion, month, campus]);
+  const completionTrend = useMemo(() => {
+    const groups = new Map<string, { name: string; 預定: number; 完成: number }>();
+    completion?.days.filter(day => (month === 'all' || day.date.startsWith(month)) && (campus === '全部院區' || day.campus === campus)).forEach(day => {
+      const key = month === 'all' ? day.date.slice(0, 7) : day.date;
+      const current = groups.get(key) || { name: month === 'all' ? key : `${Number(day.date.slice(5, 7))}/${Number(day.date.slice(8, 10))}`, 預定: 0, 完成: 0 };
+      current.預定 += day.expected;
+      current.完成 += day.executed;
+      groups.set(key, current);
+    });
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, values]) => values);
+  }, [completion, month, campus]);
+  const completionBySource = useMemo(() => {
+    const courseById = new Map(data?.courses.map(course => [course.id, course]) || []);
+    return ['門診', '住院', '回院/其他'].map(name => {
+      const due = completion?.courses.filter(progress => courseById.get(progress.courseId)?.source === name &&
+        (campus === '全部院區' || progress.campus === campus) &&
+        (month === 'all' || progress.lastScheduledDate.startsWith(month)) &&
+        (progress.status === '完成' || progress.status === '未完成')) || [];
+      return { name, due: due.length, completed: due.filter(progress => progress.status === '完成').length };
+    });
+  }, [data, completion, month, campus]);
   const eventCourseIds = useMemo(() => new Set(events.map(event => event.courseId)), [events]);
   const courseExecCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -145,10 +211,13 @@ export default function App() {
   }, [data, includedCodes]);
   const cases = useMemo(() => data?.courses.filter(course =>
     (campus === '全部院區' || course.campus === campus) &&
-    (month === 'all' || course.openingMonth === month || eventCourseIds.has(course.id)),
+    (month === 'all' || course.openingMonth === month || eventCourseIds.has(course.id) ||
+      (course.firstScheduledDate && course.lastScheduledDate &&
+        formatDate(course.firstScheduledDate).slice(0, 7) <= month && formatDate(course.lastScheduledDate).slice(0, 7) >= month)),
   ).map(course => ({ ...course, executionCount: courseExecCounts.get(course.id) || 0 })) || [], [data, month, campus, eventCourseIds, courseExecCounts]);
   const newCases = cases.filter(course => month === 'all' || course.openingMonth === month);
   const selectedCase = cases.find(course => course.id === selectedCourseId) || null;
+  const selectedCaseProgress = selectedCase ? progressByCourse.get(selectedCase.id) : null;
   const caseRows = data?.records.filter(row => row.courseId === selectedCourseId) || [];
   const caseEvents = data?.executions.filter(event => event.courseId === selectedCourseId && includedCodes.has(event.drugCode)) || [];
   const selectedIssues = data?.issues.filter(issue =>
@@ -180,6 +249,9 @@ export default function App() {
     name: `${String(hour).padStart(2, '0')}:00`,
     次數: events.filter(event => event.time.getHours() === hour).length,
   })), [events]);
+  const byWeekday = useMemo(() => ['日', '一', '二', '三', '四', '五', '六'].map((day, index) => ({
+    name: `週${day}`, 次數: events.filter(event => event.time.getDay() === index).length,
+  })), [events]);
 
   const byCampus = useMemo(() => CAMPUSES.map(name => ({ name, 護理: report.find(row => row.campus === name)?.nursing || 0, 藥劑: report.find(row => row.campus === name)?.pharmacy || 0, 醫事: report.find(row => row.campus === name)?.medicalAffairs || 0 })), [report]);
   const bySource = useMemo(() => ['門診', '住院', '回院/其他'].map(name => ({ name, value: newCases.filter(course => course.source === name).length })).filter(item => item.value > 0), [newCases]);
@@ -205,7 +277,7 @@ export default function App() {
     events.forEach(event => groups.set(event.frequency || '未填', (groups.get(event.frequency || '未填') || 0) + 1));
     return [...groups].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
   }, [events]);
-  const staffStats = useMemo(() => {
+  const doctorStats = useMemo(() => {
     const groups = new Map<string, { doctor: string; department: string; executions: number; cases: Set<string> }>();
     events.forEach(event => {
       const key = `${event.department}|${event.doctor}`;
@@ -216,11 +288,16 @@ export default function App() {
     });
     return [...groups.values()].sort((a, b) => b.executions - a.executions).slice(0, 12);
   }, [events]);
+  const executorStats = useMemo(() => groupExecutors(events), [events]);
+  const filteredExecutorStats = useMemo(() => executorStats.filter(person => !search ||
+    [person.id, person.name, person.campus].some(value => value.toLowerCase().includes(search.toLowerCase()))), [executorStats, search]);
+  const selectedExecutor = filteredExecutorStats.find(person => person.key === selectedExecutorKey) || filteredExecutorStats[0] || null;
+  const selectedExecutorEvents = useMemo(() => selectedExecutor ? events.filter(event => executorKey(event) === selectedExecutor.key).slice().reverse() : [], [events, selectedExecutor?.key]);
   const monthlyPoints = useMemo(() => data?.months.map(key => {
     const rows = performance(data, key, includedCodes).filter(row => campus === '全部院區' || row.campus === campus);
     return { name: key, 護理: rows.reduce((sum, row) => sum + row.nursingPoints, 0), 藥劑: rows.reduce((sum, row) => sum + row.pharmacyPoints, 0), 醫事: rows.reduce((sum, row) => sum + row.medicalAffairsPoints, 0) };
   }) || [], [data, campus, includedCodes]);
-  const filteredEvents = useMemo(() => events.filter(event => !search || [event.account, event.chartNo, event.drugName, event.doctor].some(field => field.toLowerCase().includes(search.toLowerCase()))).slice().reverse(), [events, search]);
+  const filteredEvents = useMemo(() => events.filter(event => !search || [event.account, event.chartNo, event.drugName, event.doctor, event.executorId, event.executorName].some(field => field.toLowerCase().includes(search.toLowerCase()))).slice().reverse(), [events, search]);
   const filteredCases = useMemo(() => cases.filter(course => !search || [course.chartNo, course.accounts.join(' '), course.doctor, course.diagnosis].some(field => field.toLowerCase().includes(search.toLowerCase()))).slice().sort((a, b) => (b.openingDate?.getTime() || 0) - (a.openingDate?.getTime() || 0)), [cases, search]);
   const pageSize = 30;
   const issueCodes = data ? [...new Set(data.issues.map(issue => issue.code))].sort() : [];
@@ -247,8 +324,8 @@ export default function App() {
 
     <main className="main">
       <header className="topbar"><div className="mobile-brand"><Activity size={21} /> OPAT</div><span className="topbar-title">OPAT 執行與績效分析</span><div className="topbar-actions">
-        {data && <button className="button ghost export-button" onClick={() => void import('./lib/excel').then(({ downloadReport }) => downloadReport(data, report, month, campus, includedCodes))}><ArrowDownToLine size={17} /> 匯出報表</button>}
-        <button className="button primary" onClick={choose}><Plus size={17} /> 匯入 Excel</button>
+        {data && completion && <button className="button ghost export-button" onClick={() => void import('./lib/excel').then(({ downloadReport }) => downloadReport(data, report, month, campus, includedCodes, completion))}><ArrowDownToLine size={17} /> 匯出 Excel 報表</button>}
+        <button className="button primary" onClick={choose} disabled={busy}><Plus size={17} /> 新增 Excel</button>
       </div></header>
       <div className="mobile-nav">{NAV.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => switchView(item.id)}>{item.label}</button>)}</div>
       <div className="content">
@@ -258,9 +335,9 @@ export default function App() {
 
         {error && <div className="error-banner"><AlertTriangle size={18} />{error}<button onClick={() => setError('')} aria-label="關閉錯誤"><X size={16} /></button></div>}
         {busy && <div className="loading"><span className="spinner" /> 正在解析 Excel 與計算報表…</div>}
-        {files.length > 0 && <div className="file-strip"><FileSpreadsheet size={17} /><span>資料來源</span>{files.map((file, index) => <span className="file-chip" key={`${file.name}-${index}`}>{file.name}<button title={`移除 ${file.name}`} aria-label={`移除 ${file.name}`} onClick={() => void process(files.filter((_, i) => i !== index))}><X size={13} /></button></span>)}<button className="text-button" onClick={() => void process([])}><Trash2 size={14} /> 清除</button></div>}
+        {files.length > 0 && <div className="file-strip" onDragOver={event => event.preventDefault()} onDrop={onDrop}><FileSpreadsheet size={17} /><span>已加入 {files.length} 個檔案</span>{files.map((file, index) => <span className="file-chip" key={`${file.name}-${index}`}><span title={file.name}>{file.name}</span><button title={`移除 ${file.name}`} aria-label={`移除 ${file.name}`} disabled={busy} onClick={() => removeFile(index)}><X size={13} /></button></span>)}<button className="text-button" disabled={busy} onClick={clearFiles}><Trash2 size={14} /> 清除</button></div>}
 
-        {!data && !busy && <EmptyState onChoose={choose} onDrop={onDrop} />}
+        {!data && !busy && <EmptyState fileCount={files.length} onChoose={choose} onAnalyze={() => void process()} onDrop={onDrop} />}
         {data && <>
           {view === 'overview' && <>
             <div className="stats-grid">
@@ -268,6 +345,20 @@ export default function App() {
               {statLine('注射抗生素施打', number(total.nursing), '#e57443', Activity)}
               {statLine('藥品保管筆數', number(total.pharmacy), '#8b65a3', Pill)}
               {statLine('管理費申報', number(total.medicalAffairs), '#d6a637', ClipboardList)}
+            </div>
+            <Section title="執行完成率" detail={`排程日期以曆日統計，截至 ${completion?.asOf || '—'}；今天未結束的排程、中斷或轉診及資料不足者不列入分母。`}>
+              <div className="stats-grid completion-stats">
+                {statLine('預定施打', number(completionSummary?.expected || 0), '#087c72', ClipboardList)}
+                {statLine('已完成施打', number(completionSummary?.executed || 0), '#e57443', Activity)}
+                {statLine('施打完成率', percentage(completionSummary?.doseRate ?? null), '#8b65a3', Check)}
+                {statLine('到期療程完成率', percentage(completionSummary?.courseRate ?? null), '#d6a637', ShieldCheck)}
+              </div>
+              <div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">預定施打</th><th className="numeric">已完成</th><th className="numeric">未完成</th><th>施打完成率</th><th className="numeric">到期療程</th><th className="numeric">完成療程</th><th>療程完成率</th></tr></thead><tbody>{completionByCampus.filter(row => campus === '全部院區' || row.name === campus).map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.expected)}</td><td className="numeric">{number(row.executed)}</td><td className="numeric">{number(row.missed)}</td><td><div className="rate-cell"><strong>{percentage(row.doseRate)}</strong><meter min="0" max="1" value={row.doseRate || 0} aria-label={`${row.name}施打完成率`} /></div></td><td className="numeric">{number(row.dueCourses)}</td><td className="numeric">{number(row.completedCourses)}</td><td><div className="rate-cell"><strong>{percentage(row.courseRate)}</strong><meter min="0" max="1" value={row.courseRate || 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div>
+              {(completionSummary?.interruptedCourses || completionSummary?.unknownCourses) ? <p className="method-note">另有中斷／轉診 {number(completionSummary?.interruptedCourses || 0)} 療程、排程資料不足 {number(completionSummary?.unknownCourses || 0)} 療程，未列入到期療程完成率。</p> : null}
+            </Section>
+            <div className="two-column wide-left">
+              <Section title={month === 'all' ? '每月預定與實際施打' : '每日預定與實際施打'} detail="排程日期採曆日；僅比較已到期且資料足夠的排程"><Chart empty={!completionTrend.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={completionTrend} margin={{ top: 12, right: 8, left: -22, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={20} tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Legend /><Bar dataKey="預定" fill={COLORS[4]} radius={[3, 3, 0, 0]} /><Bar dataKey="完成" fill={COLORS[0]} radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></Chart></Section>
+              <Section title="療程來源完成率" detail="依最後預定日期歸月；不含中斷、轉診與資料不足"><div className="table-scroll"><table><thead><tr><th>來源</th><th className="numeric">到期</th><th className="numeric">完成</th><th className="numeric">未完成</th><th>完成率</th></tr></thead><tbody>{completionBySource.map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.due)}</td><td className="numeric">{number(row.completed)}</td><td className="numeric">{number(row.due - row.completed)}</td><td><div className="rate-cell"><strong>{percentage(row.due ? row.completed / row.due : null)}</strong><meter min="0" max="1" value={row.due ? row.completed / row.due : 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div></Section>
             </div>
             <div className="two-column wide-left">
               <Section title={month === 'all' ? '每月執行趨勢' : '每日執行趨勢'} detail="月份於 08:00 切分；每日圖使用實際施打日期">
@@ -278,7 +369,7 @@ export default function App() {
               </Section>
             </div>
             <div className="two-column">
-              <Section title="療程來源" detail="D1 與 D2-D7 已合併為同一門診療程"><Chart empty={!bySource.length}><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={bySource} dataKey="value" nameKey="name" cx="50%" cy="46%" innerRadius="52%" outerRadius="78%" paddingAngle={3}>{bySource.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}</Pie><Tooltip /><Legend verticalAlign="bottom" /></PieChart></ResponsiveContainer></Chart></Section>
+              <Section title="療程來源" detail="D1 與 D2-D7 已合併為同一門診療程"><Chart empty={!bySource.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={bySource} layout="vertical" margin={{ top: 16, right: 20, left: 4, bottom: 8 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={75} /><Tooltip /><Bar dataKey="value" name="療程數" fill={COLORS[1]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section>
               <Section title="常用注射抗生素" detail="依實際施打次數排序"><Chart empty={!topDrugs.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={topDrugs} layout="vertical" margin={{ top: 0, right: 15, left: 8, bottom: 0 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="value" name="執行次數" fill={COLORS[0]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section>
             </div>
             <Section title="院區療程狀況" detail="依預計施行日期與實際施打明細；失敗與轉診另外列示"><div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">療程</th><th className="numeric">有執行</th><th className="numeric">未執行</th><th className="numeric">待施行</th><th className="numeric">失敗標記</th><th className="numeric">轉急診/住院</th></tr></thead><tbody>{branchStatus.map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{row.courses}</td><td className="numeric">{row.executed}</td><td className="numeric">{row.missed}</td><td className="numeric">{row.pending}</td><td className="numeric">{row.failed}</td><td className="numeric">{row.transferred}</td></tr>)}</tbody></table></div></Section>
@@ -295,9 +386,21 @@ export default function App() {
               <Section title={month === 'all' ? '每月施打次數' : '每日施打次數'}><Chart empty={!events.length}><ResponsiveContainer width="100%" height="100%"><AreaChart data={trend} margin={{ top: 12, right: 14, left: -24, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={24} tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Legend />{CAMPUSES.filter(name => campus === '全部院區' || campus === name).map((name, i) => <Area key={name} dataKey={name} stackId="a" stroke={COLORS[i]} fill={COLORS[i]} fillOpacity={0.8} />)}</AreaChart></ResponsiveContainer></Chart></Section>
               <Section title="施打時段" detail="實際時間，以整點分組"><Chart empty={!events.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={hourly} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" interval={3} tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="次數" fill={COLORS[1]} radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></Chart></Section>
             </div>
-            <div className="two-column"><Section title="藥品施打排行"><Chart empty={!topDrugs.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={topDrugs} layout="vertical" margin={{ top: 0, right: 15, left: 8, bottom: 0 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="value" name="次數" fill={COLORS[0]} /></BarChart></ResponsiveContainer></Chart></Section><Section title="醫令頻率"><Chart empty={!byFrequency.length}><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={byFrequency} dataKey="value" nameKey="name" cx="50%" cy="46%" outerRadius="76%">{byFrequency.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip /><Legend verticalAlign="bottom" /></PieChart></ResponsiveContainer></Chart></Section></div>
-            <Section title="科別與醫師" detail="依施打次數排序"><div className="table-scroll"><table><thead><tr><th>科別</th><th>醫師</th><th className="numeric">療程數</th><th className="numeric">施打次數</th></tr></thead><tbody>{staffStats.map((item, index) => <tr key={index}><td>{item.department}</td><td>{item.doctor}</td><td className="numeric">{number(item.cases.size)}</td><td className="numeric emph">{number(item.executions)}</td></tr>)}</tbody></table></div></Section>
-            <Section title="施打紀錄" detail={`共 ${number(filteredEvents.length)} 次`} action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} placeholder="帳號、病歷號、藥品、醫師" /></div>}><div className="table-scroll"><table><thead><tr><th>執行時間</th><th>績效月</th><th>院區</th><th>帳號</th><th>病歷號</th><th>注射抗生素</th><th>頻率</th><th>來源列</th></tr></thead><tbody>{filteredEvents.slice((page - 1) * pageSize, page * pageSize).map(event => <tr key={event.id}><td className="nowrap">{formatDate(event.time, true)}</td><td>{event.month}</td><td>{event.campus}</td><td className="mono">{event.account}</td><td className="mono">{event.chartNo}</td><td>{event.drugName}</td><td>{event.frequency}</td><td className="mono">{event.rowId}</td></tr>)}</tbody></table></div><Pagination page={page} total={filteredEvents.length} size={pageSize} onChange={setPage} /></Section>
+            <div className="two-column"><Section title="藥品施打排行"><Chart empty={!topDrugs.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={topDrugs} layout="vertical" margin={{ top: 0, right: 15, left: 8, bottom: 0 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="value" name="次數" fill={COLORS[0]} /></BarChart></ResponsiveContainer></Chart></Section><Section title="醫令頻率"><Chart empty={!byFrequency.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={byFrequency} layout="vertical" margin={{ top: 16, right: 18, left: 0, bottom: 8 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={68} /><Tooltip /><Bar dataKey="value" name="施打次數" fill={COLORS[2]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section></div>
+            <div className="two-column"><Section title="星期分布" detail="實際施打時間"><Chart empty={!events.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={byWeekday} margin={{ top: 12, right: 10, left: -22, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="次數" fill={COLORS[4]} radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></Chart></Section><Section title="各藥品預定施打完成" detail="排程日與實際施打時間比對"><div className="table-scroll"><table><thead><tr><th>藥品</th><th className="numeric">預定</th><th className="numeric">完成</th><th className="numeric">未完成</th><th>完成率</th></tr></thead><tbody>{completionByDrug.slice(0, 12).map(drug => <tr key={drug.code}><td title={drug.name}>{drug.name}</td><td className="numeric">{number(drug.expected)}</td><td className="numeric">{number(drug.executed)}</td><td className="numeric">{number(drug.expected - drug.executed)}</td><td className="emph">{percentage(drug.expected ? drug.executed / drug.expected : null)}</td></tr>)}</tbody></table></div></Section></div>
+            <Section title="科別與醫師" detail="依施打次數排序"><div className="table-scroll"><table><thead><tr><th>科別</th><th>醫師</th><th className="numeric">療程數</th><th className="numeric">施打次數</th></tr></thead><tbody>{doctorStats.map((item, index) => <tr key={index}><td>{item.department}</td><td>{item.doctor}</td><td className="numeric">{number(item.cases.size)}</td><td className="numeric emph">{number(item.executions)}</td></tr>)}</tbody></table></div></Section>
+            <Section title="施打紀錄" detail={`共 ${number(filteredEvents.length)} 次`} action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} placeholder="帳號、病歷號、藥品、醫師、人員" /></div>}><div className="table-scroll"><table><thead><tr><th>執行時間</th><th>績效月</th><th>院區</th><th>執行人員</th><th>人員代碼</th><th>帳號</th><th>病歷號</th><th>注射抗生素</th><th>頻率</th><th>來源列</th></tr></thead><tbody>{filteredEvents.slice((page - 1) * pageSize, page * pageSize).map(event => <tr key={event.id}><td className="nowrap">{formatDate(event.time, true)}</td><td>{event.month}</td><td>{event.campus}</td><td>{event.executorName || '未記錄'}</td><td className="mono">{event.executorId || '—'}</td><td className="mono">{event.account}</td><td className="mono">{event.chartNo}</td><td>{event.drugName}</td><td>{event.frequency}</td><td className="mono">{event.rowId}</td></tr>)}</tbody></table></div><Pagination page={page} total={filteredEvents.length} size={pageSize} onChange={setPage} /></Section>
+          </>}
+
+          {view === 'staff' && <>
+            <div className="stats-grid three">
+              {statLine('有紀錄執行人員', number(executorStats.filter(person => person.name !== '未記錄').length), '#087c72', Users)}
+              {statLine('可追溯施打', number(events.filter(event => event.executorName).length), '#e57443', Activity)}
+              {statLine('施打病人數', number(new Set(events.map(event => `${event.campus}|${event.chartNo}`)).size), '#8b65a3', Stethoscope)}
+            </div>
+            <Section title="人員施打量" detail="依實際施打次數排序"><Chart empty={!executorStats.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={executorStats.slice(0, 12)} layout="vertical" margin={{ top: 2, right: 18, left: 8, bottom: 2 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="executions" name="施打次數" fill={COLORS[0]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section>
+            <Section title="執行人員統計" detail={`共 ${number(filteredExecutorStats.length)} 位／組`} action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); setExecutorPage(1); }} placeholder="姓名、人員代碼、院區" /></div>}><div className="table-scroll"><table><thead><tr><th>執行人員</th><th>人員代碼</th><th>院區</th><th className="numeric">施打次數</th><th className="numeric">病人數</th><th className="numeric">療程數</th><th className="numeric">藥品種類</th><th>首次施打</th><th>最後施打</th></tr></thead><tbody>{filteredExecutorStats.slice((page - 1) * pageSize, page * pageSize).map(person => <tr key={person.key} className={selectedExecutor?.key === person.key ? 'selected-row' : ''}><td><button className="table-link" onClick={() => { setSelectedExecutorKey(person.key); setExecutorPage(1); }}>{person.name}</button></td><td className="mono">{person.id || '—'}</td><td>{person.campus}</td><td className="numeric emph">{number(person.executions)}</td><td className="numeric">{number(person.patients)}</td><td className="numeric">{number(person.courses)}</td><td className="numeric">{number(person.drugs)}</td><td className="nowrap">{formatDate(person.first, true)}</td><td className="nowrap">{formatDate(person.last, true)}</td></tr>)}</tbody></table></div><Pagination page={page} total={filteredExecutorStats.length} size={pageSize} onChange={setPage} /></Section>
+            {selectedExecutor && <Section title={`${selectedExecutor.name}的施打明細`} detail={`${selectedExecutor.campus} · ${selectedExecutor.id || '人員代碼未記錄'} · 共 ${number(selectedExecutorEvents.length)} 次`}><div className="table-scroll"><table><thead><tr><th>執行時間</th><th>帳號</th><th>病歷號</th><th>診療行為</th><th>注射抗生素</th><th>科別</th><th>看診醫師</th><th>來源列</th></tr></thead><tbody>{selectedExecutorEvents.slice((executorPage - 1) * pageSize, executorPage * pageSize).map(event => <tr key={event.id}><td className="nowrap">{formatDate(event.time, true)}</td><td className="mono">{event.account}</td><td className="mono">{event.chartNo}</td><td>{event.treatment}</td><td>{event.drugName}</td><td>{event.department}</td><td>{event.doctor}</td><td className="mono">{event.rowId}</td></tr>)}</tbody></table></div><Pagination page={executorPage} total={selectedExecutorEvents.length} size={pageSize} onChange={setExecutorPage} /></Section>}
           </>}
 
           {view === 'performance' && <>
@@ -311,8 +414,8 @@ export default function App() {
           </>}
 
           {view === 'cases' && <>
-            <div className="stats-grid">{statLine('範圍內療程', number(cases.length), '#087c72', Users)}{statLine('有施打紀錄', number(cases.filter(course => course.executionCount > 0).length), '#e57443', Stethoscope)}{statLine('未執行', number(cases.filter(course => courseStatus(course) === '未執行').length), '#8b65a3', AlertTriangle)}{statLine('待施行', number(cases.filter(course => courseStatus(course) === '待施行').length), '#d6a637', ClipboardList)}</div>
-            <Section title="療程清單" detail="門診 D1 與 D2-D7 依同院區病歷號及相近開案日期合併" action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} placeholder="帳號、病歷號、醫師、診斷" /></div>}><div className="table-scroll"><table><thead><tr><th>開案日期</th><th>院區</th><th>病歷號</th><th>帳號</th><th>來源</th><th>主診斷</th><th className="numeric">施打</th><th className="numeric">申報</th><th>狀態</th></tr></thead><tbody>{filteredCases.slice((page - 1) * pageSize, page * pageSize).map(course => <tr key={course.id} className="clickable" onClick={() => setSelectedCourseId(course.id)}><td>{formatDate(course.openingDate)}</td><td>{course.campus}</td><td className="mono">{course.chartNo}</td><td className="mono accounts-cell">{course.accounts.join(' / ')}</td><td>{course.source}</td><td>{course.diagnosis || '—'}</td><td className="numeric">{number(course.executionCount)}</td><td className="numeric">{number(course.feeCount)}</td><td><span className={`status ${courseStatus(course) === '失敗標記' || courseStatus(course) === '未執行' ? 'danger' : courseStatus(course) === '有執行' ? 'good' : 'neutral'}`}>{courseStatus(course)}</span></td></tr>)}</tbody></table></div><Pagination page={page} total={filteredCases.length} size={pageSize} onChange={setPage} /></Section>
+            <div className="stats-grid">{statLine('範圍內療程', number(cases.length), '#087c72', Users)}{statLine('有施打紀錄', number(cases.filter(course => course.executionCount > 0).length), '#e57443', Stethoscope)}{statLine('到期完成療程', number(completionSummary?.completedCourses || 0), '#8b65a3', Check)}{statLine('排程資料不足', number(completionSummary?.unknownCourses || 0), '#d6a637', AlertTriangle)}</div>
+            <Section title="療程清單" detail="門診 D1 與 D2-D7 依同院區病歷號及相近開案日期合併" action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} placeholder="帳號、病歷號、醫師、診斷" /></div>}><div className="table-scroll"><table><thead><tr><th>開案日期</th><th>院區</th><th>病歷號</th><th>帳號</th><th>來源</th><th>主診斷</th><th className="numeric">施打</th><th className="numeric">預定</th><th className="numeric">申報</th><th>療程狀態</th></tr></thead><tbody>{filteredCases.slice((page - 1) * pageSize, page * pageSize).map(course => { const progress = progressByCourse.get(course.id); return <tr key={course.id} className="clickable" onClick={() => setSelectedCourseId(course.id)}><td>{formatDate(course.openingDate)}</td><td>{course.campus}</td><td className="mono">{course.chartNo}</td><td className="mono accounts-cell">{course.accounts.join(' / ')}</td><td>{course.source}</td><td>{course.diagnosis || '—'}</td><td className="numeric">{number(course.executionCount)}</td><td className="numeric">{progress ? number(progress.expected) : '—'}</td><td className="numeric">{number(course.feeCount)}</td><td><span className={`status ${progress?.status === '未完成' || progress?.status === '中斷/轉診' ? 'danger' : progress?.status === '完成' ? 'good' : 'neutral'}`}>{progress?.status || courseStatus(course)}</span></td></tr>; })}</tbody></table></div><Pagination page={page} total={filteredCases.length} size={pageSize} onChange={setPage} /></Section>
           </>}
 
           {view === 'audit' && <>
@@ -324,7 +427,19 @@ export default function App() {
       </div>
     </main>
 
-    {selectedCase && <div className="drawer-backdrop" onClick={() => setSelectedCourseId(null)}><aside className="drawer" onClick={event => event.stopPropagation()}><div className="drawer-head"><div><small>療程明細</small><h2>{selectedCase.chartNo}</h2></div><button aria-label="關閉明細" onClick={() => setSelectedCourseId(null)}><X size={20} /></button></div><div className="drawer-body"><dl><div><dt>院區</dt><dd>{selectedCase.campus}</dd></div><div><dt>來源</dt><dd>{selectedCase.source}</dd></div><div><dt>開案日期</dt><dd>{formatDate(selectedCase.openingDate)}</dd></div><div><dt>醫師</dt><dd>{selectedCase.doctor || '—'}</dd></div><div><dt>帳號</dt><dd className="mono">{selectedCase.accounts.join(' / ')}</dd></div><div><dt>主診斷</dt><dd>{selectedCase.diagnosis || '—'}</dd></div><div><dt>施打次數</dt><dd>{selectedCase.executionCount}</dd></div><div><dt>管理費申報</dt><dd>{selectedCase.feeCount}</dd></div><div><dt>轉急診日</dt><dd>{formatDate(selectedCase.transferEmergency)}</dd></div><div><dt>轉住院日</dt><dd>{formatDate(selectedCase.transferHospital)}</dd></div></dl><h3>施打時間</h3><div className="drawer-list">{caseEvents.length ? caseEvents.map(event => <div key={event.id}><time>{formatDate(event.time, true)}</time><span>{event.drugName}</span></div>) : <p>無注射抗生素施打紀錄</p>}</div><h3>原始資料列</h3><div className="drawer-list">{caseRows.map(row => <div key={row.id}><time>{row.file} #{row.rowNumber}</time><span>{row.treatment} · {row.drugName}</span></div>)}</div></div></aside></div>}
+    {selectedCase && <div className="drawer-backdrop" onClick={() => setSelectedCourseId(null)}><aside className="drawer" onClick={event => event.stopPropagation()}>
+      <div className="drawer-head"><div><small>療程明細</small><h2>{selectedCase.chartNo}</h2></div><button aria-label="關閉明細" onClick={() => setSelectedCourseId(null)}><X size={20} /></button></div>
+      <div className="drawer-body"><dl>
+        <div><dt>院區</dt><dd>{selectedCase.campus}</dd></div><div><dt>來源</dt><dd>{selectedCase.source}</dd></div>
+        <div><dt>開案日期</dt><dd>{formatDate(selectedCase.openingDate)}</dd></div><div><dt>醫師</dt><dd>{selectedCase.doctor || '—'}</dd></div>
+        <div><dt>帳號</dt><dd className="mono">{selectedCase.accounts.join(' / ')}</dd></div><div><dt>主診斷</dt><dd>{selectedCase.diagnosis || '—'}</dd></div>
+        <div><dt>施打次數</dt><dd>{selectedCase.executionCount}</dd></div><div><dt>到期預定施打</dt><dd>{selectedCaseProgress?.expected ?? '—'}</dd></div>
+        <div><dt>排程對應施打</dt><dd>{selectedCaseProgress?.executed ?? '—'}</dd></div><div><dt>療程完成狀態</dt><dd>{selectedCaseProgress?.status || '無注射抗生素排程'}</dd></div>
+        <div><dt>管理費申報</dt><dd>{selectedCase.feeCount}</dd></div><div><dt>轉急診日</dt><dd>{formatDate(selectedCase.transferEmergency)}</dd></div>
+        <div><dt>轉住院日</dt><dd>{formatDate(selectedCase.transferHospital)}</dd></div>
+      </dl><h3>施打時間與人員</h3><div className="drawer-list">{caseEvents.length ? caseEvents.map(event => <div key={event.id}><time>{formatDate(event.time, true)}</time><span>{event.drugName}<small>{event.executorName || '人員未記錄'} {event.executorId}</small></span></div>) : <p>無注射抗生素施打紀錄</p>}</div>
+      <h3>原始資料列</h3><div className="drawer-list">{caseRows.map(row => <div key={row.id}><time>{row.file} #{row.rowNumber}</time><span>{row.treatment} · {row.drugName}</span></div>)}</div></div>
+    </aside></div>}
   </div>;
 }
 

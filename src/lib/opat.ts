@@ -11,6 +11,7 @@ export interface RecordRow {
   id: string;
   file: string;
   rowNumber: number;
+  raw: RawRow;
   campus: Campus;
   account: string;
   chartNo: string;
@@ -27,7 +28,9 @@ export interface RecordRow {
   feeCount: number;
   refund: number;
   detail: string;
+  executorDetail: string;
   times: Date[];
+  executors: { id: string; name: string }[];
   visitDate: Date | null;
   confirmDate: Date | null;
   startDate: Date | null;
@@ -49,6 +52,8 @@ export interface Execution {
   drugName: string;
   department: string;
   doctor: string;
+  executorId: string;
+  executorName: string;
   treatment: string;
   frequency: string;
   kind: DrugKind;
@@ -190,8 +195,13 @@ function campusFor(row: RawRow, file: string): Campus {
   return '未判定';
 }
 
-function parseTimes(detail: string): Date[] {
-  return detail.split(/[，,;；\n]+/).map(parseOpatDate).filter((date): date is Date => date !== null);
+function splitDetails(detail: string): string[] {
+  return detail.split(/[，,;；\n]+/).map(part => part.trim()).filter(Boolean);
+}
+
+function parseExecutor(detail: string): { id: string; name: string } {
+  const match = detail.match(/^([A-Za-z]\d{5})\s*(.*)$/);
+  return match ? { id: match[1].toUpperCase(), name: match[2].trim() } : { id: '', name: detail };
 }
 
 function firstDate(row: RecordRow): Date | null {
@@ -208,11 +218,17 @@ export function analyze(files: SourceFile[]): Analysis {
 
   files.forEach((file, fileIndex) => file.rows.forEach((raw, index) => {
     const detail = value(raw['執行次數明細']);
-    const times = parseTimes(detail);
+    const executorDetail = value(raw['執行人員明細']);
+    const timeParts = splitDetails(detail);
+    const executorParts = splitDetails(executorDetail);
+    const validEntries = timeParts.map((part, position) => ({ time: parseOpatDate(part), executor: parseExecutor(executorParts[position] || '') }))
+      .filter((entry): entry is { time: Date; executor: { id: string; name: string } } => entry.time !== null);
+    const times = validEntries.map(entry => entry.time);
     const row: RecordRow = {
       id: `${fileIndex}:${index + 2}`,
       file: file.name,
       rowNumber: index + 2,
+      raw,
       campus: campusFor(raw, file.name),
       account: value(raw['帳號']),
       chartNo: value(raw['病歷號']),
@@ -229,7 +245,9 @@ export function analyze(files: SourceFile[]): Analysis {
       feeCount: number(raw['39029C管理費數量']),
       refund: number(raw['針劑應退量']),
       detail,
+      executorDetail,
       times,
+      executors: validEntries.map(entry => entry.executor),
       visitDate: parseOpatDate(raw['帳號看診日']),
       confirmDate: parseOpatDate(raw['確認日期']),
       startDate: parseOpatDate(raw['開始日']),
@@ -242,7 +260,8 @@ export function analyze(files: SourceFile[]): Analysis {
     if (!row.account || !row.chartNo) addIssue(issues, row, 'missing-id', '缺少帳號或病歷號，請核對來源');
     if (row.campus === '未判定') addIssue(issues, row, 'campus', '院區無法判定，未納入院區績效');
     if (row.kind === 'review' && (row.executionCount > 0 || row.times.length > 0)) addIssue(issues, row, 'drug-review', '藥品種類待確認，暫不計入護理與藥劑');
-    if (detail && times.length !== detail.split(/[，,;；\n]+/).filter(Boolean).length) addIssue(issues, row, 'invalid-time', '執行明細有無法解析的時間');
+    if (detail && times.length !== timeParts.length) addIssue(issues, row, 'invalid-time', '執行明細有無法解析的時間');
+    if (timeParts.length && executorParts.length !== timeParts.length) addIssue(issues, row, 'executor-mismatch', `執行時間 ${timeParts.length} 筆，人員明細 ${executorParts.length} 筆；無法完整對應執行人員`);
     if (row.executionCount !== times.length && (row.executionCount > 0 || times.length > 0)) addIssue(issues, row, 'count-mismatch', `執行次數 ${row.executionCount}，明細時間 ${times.length} 筆`);
     if (row.refund !== 0 && times.length > 0) addIssue(issues, row, 'refund-execution', '退量非零但有執行明細，已依明細保留施打', 'warning');
     records.push(row);
@@ -281,9 +300,16 @@ export function analyze(files: SourceFile[]): Analysis {
   records.forEach(row => { row.courseId = find(`${row.campus}|${row.account}`); });
 
   const executionMap = new Map<string, Execution>();
-  records.forEach(row => row.times.forEach(time => {
+  records.forEach(row => row.times.forEach((time, index) => {
     const key = `${row.courseId}|${row.drugCode}|${time.getTime()}`;
-    if (executionMap.has(key)) {
+    const prior = executionMap.get(key);
+    if (prior) {
+      const currentExecutor = row.executors[index];
+      const priorPerson = prior.executorId || prior.executorName;
+      const currentPerson = currentExecutor?.id || currentExecutor?.name;
+      if (priorPerson && currentPerson && priorPerson !== currentPerson) {
+        addIssue(issues, row, 'executor-conflict', `重複施打時間 ${formatDate(time, true)} 的執行人員不一致，請人工核對`);
+      }
       addIssue(issues, row, 'duplicate', `重複執行時間 ${formatDate(time, true)}，已排除重複計數`);
       return;
     }
@@ -291,6 +317,7 @@ export function analyze(files: SourceFile[]): Analysis {
       id: key, rowId: row.id, courseId: row.courseId, campus: row.campus,
       account: row.account, chartNo: row.chartNo, drugCode: row.drugCode,
       drugName: row.drugName, department: row.department, doctor: row.doctor,
+      executorId: row.executors[index]?.id || '', executorName: row.executors[index]?.name || '',
       treatment: row.treatment, frequency: row.frequency, kind: row.kind,
       time, month: reportingMonth(time), date: formatDate(time), reportingDate: reportingDate(time),
     });
@@ -364,11 +391,19 @@ export function analyze(files: SourceFile[]): Analysis {
     else catalogMap.set(key, { code: row.drugCode, name: row.drugName, kind: row.kind, rows: 1 });
   });
 
-  const months = [...new Set([
+  const monthSet = new Set([
     ...executions.map(event => event.month),
     ...feeClaims.map(claim => claim.month),
     ...courses.map(course => course.openingMonth),
-  ])].filter(month => /^\d{4}-\d{2}$/.test(month)).sort();
+  ]);
+  records.forEach(row => {
+    if (!row.startDate || !row.endDate || row.endDate < row.startDate ||
+      row.endDate.getTime() - row.startDate.getTime() > 366 * 86400_000) return;
+    for (let date = new Date(row.startDate.getFullYear(), row.startDate.getMonth(), 1); date <= row.endDate; date.setMonth(date.getMonth() + 1)) {
+      monthSet.add(formatDate(date).slice(0, 7));
+    }
+  });
+  const months = [...monthSet].filter(month => /^\d{4}-\d{2}$/.test(month)).sort();
 
   return { records, executions, feeClaims, courses, issues, months, drugCatalog: [...catalogMap.values()].sort((a, b) => b.rows - a.rows) };
 }
