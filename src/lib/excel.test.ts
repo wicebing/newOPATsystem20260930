@@ -6,7 +6,7 @@ import { createReportWorkbook } from './excel';
 
 describe('Excel report', () => {
   it('includes legacy forms, executor-level injections, and completion evidence', () => {
-    const analysis = analyze([{ name: 'sample-g.xlsx', rows: [{
+    const analysis = analyze([{ name: '1150725_OPAT個案資料g.xlsx', rows: [{
       帳號: '26T70000001', 病歷號: 'G000001', 院區: '竹東',
       診療行為: '門診轉OPAT「D2-D7」', 組合商品名: 'Sintrix 500 mg/vial',
       藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 1,
@@ -27,7 +27,9 @@ describe('Excel report', () => {
     expect(legacy[0]).toMatchObject({ 帳號: '26T70000001', 執行人員明細: 'G00001王甲乙' });
     const legacyPerformance = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Step2原系統格式']);
     expect(legacyPerformance[0]).toEqual({ campus: '竹東', nursing: 1, pharmacy: 1, medicalAffairs: 1 });
+    const summary = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['績效總表']);
+    expect(summary[0]).toMatchObject({ 資料快照日: '2026-07-25', 原始施打明細: 1, 排除重複或超頻: 0 });
     const completionRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['完成率']);
-    expect(completionRows[0]).toMatchObject({ 預定施打: 2, 已完成施打: 1, '施打完成率(%)': 50 });
+    expect(completionRows[0]).toMatchObject({ 資料快照日: '2026-07-25', 預定施打: 2, 已完成施打: 1, '施打完成率(%)': 50 });
   });
 });

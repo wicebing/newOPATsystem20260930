@@ -35,6 +35,9 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
   const summary = selectedRows.map(row => ({
     月份: month === 'all' ? '全部期間' : month,
     院區: row.campus,
+    資料快照日: formatDate(analysis.snapshotDate),
+    原始施打明細: row.rawNursing,
+    排除重複或超頻: row.excludedNursing,
     護理執行次數: row.nursing,
     護理點數: row.nursingPoints,
     藥劑保管筆數: row.pharmacy,
@@ -64,7 +67,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
   }));
   const completionRows = (campus === '全部院區' ? ['全部院區', '新竹', '竹北', '竹東'] : [campus]).map(name => {
     const result = summarizeCompletion(completion, month, name);
-    return { 月份: month === 'all' ? '全部期間' : month, 院區: name, 截至: completion.asOf,
+    return { 月份: month === 'all' ? '全部期間' : month, 院區: name, 資料快照日: formatDate(analysis.snapshotDate), 截至: completion.asOf,
       預定施打: result.expected, 已完成施打: result.executed, 未完成施打: result.missed,
       '施打完成率(%)': result.doseRate === null ? '' : Math.round(result.doseRate * 1000) / 10,
       到期療程: result.dueCourses, 完成療程: result.completedCourses,

@@ -48,7 +48,7 @@ describe('Excel import queue', () => {
   });
 
   it('shows the executor and patient for an analyzed injection', async () => {
-    reader.mockResolvedValueOnce([{ name: 'sample-g.xlsx', rows: [{
+    reader.mockResolvedValueOnce([{ name: '1150725_OPAT個案資料g.xlsx', rows: [{
       帳號: '26T70000001', 病歷號: 'G000001', 院區: '竹東',
       診療行為: '門診轉OPAT「D1」', 組合商品名: 'Sintrix 500 mg/vial',
       藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 1,
@@ -57,9 +57,9 @@ describe('Excel import queue', () => {
     }] }]);
     const { container } = render(<App />);
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
-    fireEvent.change(input, { target: { files: [new File(['g'], 'g.xlsx')] } });
+    fireEvent.change(input, { target: { files: [new File(['g'], '1150725_OPAT個案資料g.xlsx')] } });
     fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
-    await screen.findByText('已載入 1 筆原始資料、1 個療程');
+    await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
 
     fireEvent.click(screen.getAllByRole('button', { name: '執行人員' })[0]);
     expect(screen.getByRole('button', { name: '王甲乙' })).toBeTruthy();
@@ -68,7 +68,7 @@ describe('Excel import queue', () => {
   });
 
   it('keeps a scheduled but unexecuted course visible in its due month', async () => {
-    reader.mockResolvedValueOnce([{ name: 'sample-g.xlsx', rows: [{
+    reader.mockResolvedValueOnce([{ name: '1150804_OPAT個案資料g.xlsx', rows: [{
       帳號: '26T70000002', 病歷號: 'G000002', 院區: '竹東',
       診療行為: '門診轉OPAT「D1」', 組合商品名: 'Sintrix 500 mg/vial',
       藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 0,
@@ -77,9 +77,9 @@ describe('Excel import queue', () => {
     }] }]);
     const { container } = render(<App />);
     fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement,
-      { target: { files: [new File(['g'], 'g.xlsx')] } });
+      { target: { files: [new File(['g'], '1150804_OPAT個案資料g.xlsx')] } });
     fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
-    await screen.findByText('已載入 1 筆原始資料、1 個療程');
+    await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
     expect((screen.getByLabelText('績效月份') as HTMLSelectElement).value).toBe('2026-08');
 
     fireEvent.click(screen.getAllByRole('button', { name: '個案明細' })[0]);

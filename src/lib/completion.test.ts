@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { analyze } from './opat';
 import type { RawRow } from './opat';
-import { buildCompletion, summarizeCompletion } from './completion';
+import { buildCompletion, dailyComparison, summarizeCompletion } from './completion';
 
 function row(values: Partial<RawRow> = {}): RawRow {
   return {
@@ -53,5 +53,37 @@ describe('scheduled injection completion', () => {
     const report = buildCompletion(data, included, today);
     expect(report.courses[0].status).toBe('資料不足');
     expect(summarizeCompletion(report)).toMatchObject({ expected: 0, doseRate: null, unknownCourses: 1 });
+  });
+
+  it('treats the snapshot day and later as pending, while keeping earlier missed doses visible', () => {
+    const data = analyze([{ name: '1150908_OPAT個案資料g.xlsx', rows: [
+      row({ 執行次數: 0, 執行次數明細: '', 執行人員明細: '', 開始日: '20260907', 結束日: '20260909', 確認日期: '20260907' }),
+      row({ 帳號: '26T70000002', 病歷號: 'G000002', 執行次數: 0, 執行次數明細: '', 執行人員明細: '',
+        開始日: '20260908', 結束日: '20260910', 確認日期: '20260908' }),
+    ] }]);
+    const report = buildCompletion(data, included, data.snapshotDate);
+    expect(report.asOf).toBe('2026-09-07');
+    expect(report.days).toHaveLength(1);
+    expect(report.courses.map(course => course.status)).toEqual(['進行中', '待執行']);
+    expect(summarizeCompletion(report)).toMatchObject({ expected: 1, missed: 1, dueCourses: 0 });
+  });
+
+  it('shows planned and actual in one daily bar, including extra injections', () => {
+    const data = analyze([{ name: '1150908_OPAT個案資料g.xlsx', rows: [
+      row({ 開始日: '20260906', 結束日: '20260906', 確認日期: '20260906',
+        執行次數明細: '2026/09/06 09:00' }),
+      row({ 帳號: '26T70000002', 病歷號: 'G000002', 開始日: '20260907', 結束日: '20260907',
+        確認日期: '20260907', 執行次數: 0, 執行次數明細: '' }),
+      row({ 帳號: '26T70000003', 病歷號: 'G000003', 開始日: '20260908', 結束日: '20260908',
+        確認日期: '20260908', 執行次數明細: '2026/09/07 10:00' }),
+    ] }]);
+    const report = buildCompletion(data, included, data.snapshotDate);
+    expect(dailyComparison(data, report, included, '2026-09', '竹東')).toEqual([
+      expect.objectContaining({ key: '2026-09-06', 預定: 1, 實際: 1, 完成: 1, 未完成: 0, 額外施打: 0 }),
+      expect.objectContaining({ key: '2026-09-07', 預定: 1, 實際: 1, 完成: 0, 未完成: 1, 額外施打: 1 }),
+    ]);
+    expect(dailyComparison(data, report, included, 'all', '竹東')[0]).toMatchObject({
+      key: '2026-09', 預定: 2, 實際: 2, 完成: 1, 未完成: 1, 額外施打: 1,
+    });
   });
 });

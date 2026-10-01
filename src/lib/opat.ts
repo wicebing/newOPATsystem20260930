@@ -105,6 +105,9 @@ export interface DataIssue {
 }
 
 export interface Analysis {
+  snapshotDate: Date;
+  snapshotSource: 'filename' | 'system';
+  snapshotWarning: string;
   records: RecordRow[];
   executions: Execution[];
   feeClaims: FeeClaim[];
@@ -157,6 +160,14 @@ export function parseOpatDate(input: unknown): Date | null {
   const date = new Date(year, month - 1, day, hour, minute, second);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day || hour > 23 || minute > 59 || second > 59) return null;
   return date;
+}
+
+export function snapshotDateFromFilename(filename: string): Date | null {
+  const match = filename.match(/(?:^|[^\d])(\d{7,8})(?!\d)/);
+  if (!match) return null;
+  const value = match[1];
+  const year = value.length === 7 ? Number(value.slice(0, 3)) + 1911 : Number(value.slice(0, 4));
+  return parseOpatDate(`${year}${value.slice(-4)}`);
 }
 
 export function formatDate(date: Date | null, withTime = false): string {
@@ -215,6 +226,18 @@ function addIssue(issues: DataIssue[], row: RecordRow, code: string, message: st
 export function analyze(files: SourceFile[]): Analysis {
   const issues: DataIssue[] = [];
   const records: RecordRow[] = [];
+  const fileDates = files.map(file => snapshotDateFromFilename(file.name));
+  const parsedDates = fileDates.filter((date): date is Date => date !== null);
+  const snapshotDate = parsedDates.length
+    ? new Date(Math.min(...parsedDates.map(date => date.getTime())))
+    : new Date();
+  const snapshotWarning = !parsedDates.length
+    ? '檔名沒有可辨識的下載日期，待執行判定暫以今天為準。'
+    : fileDates.some(date => date === null)
+      ? '部分檔名沒有可辨識的下載日期，待執行判定採已辨識檔案中最早日期。'
+      : new Set(parsedDates.map(date => formatDate(date))).size > 1
+        ? '檔案下載日期不一致，待執行判定採最早日期。'
+        : '';
 
   files.forEach((file, fileIndex) => file.rows.forEach((raw, index) => {
     const detail = value(raw['執行次數明細']);
@@ -350,8 +373,10 @@ export function analyze(files: SourceFile[]): Analysis {
       if (!claimsByAccount.has(key)) claimsByAccount.set(key, row);
     });
   const feeClaims: FeeClaim[] = [...claimsByAccount.values()].map(row => {
-    const date = row.times[0] || firstDate(row);
-    return { account: row.account, campus: row.campus, courseId: row.courseId, count: row.feeCount, month: date ? reportingMonth(date) : '日期未明', rowId: row.id };
+    const time = row.times[0];
+    const date = firstDate(row);
+    const month = time ? reportingMonth(time) : date ? formatDate(date).slice(0, 7) : '日期未明';
+    return { account: row.account, campus: row.campus, courseId: row.courseId, count: row.feeCount, month, rowId: row.id };
   });
 
   const courseRows = new Map<string, RecordRow[]>();
@@ -366,7 +391,7 @@ export function analyze(files: SourceFile[]): Analysis {
     return {
       id, campus: first.campus, chartNo: first.chartNo,
       accounts: [...new Set(rows.map(row => row.account))],
-      source: treatment.includes('門診轉OPAT') ? '門診' : treatment.includes('住院轉OPAT') ? '住院' : '回院/其他',
+      source: treatment.includes('門診轉OPAT') ? '門診' : treatment.includes('住院轉OPAT') ? '住院' : '急診',
       doctor: first.doctor, department: first.department, diagnosis: first.diagnosis,
       openingDate: dates[0] || events[0]?.time || null,
       openingMonth: dates[0] ? formatDate(dates[0]).slice(0, 7) : events[0]?.month || '日期未明',
@@ -405,11 +430,14 @@ export function analyze(files: SourceFile[]): Analysis {
   });
   const months = [...monthSet].filter(month => /^\d{4}-\d{2}$/.test(month)).sort();
 
-  return { records, executions, feeClaims, courses, issues, months, drugCatalog: [...catalogMap.values()].sort((a, b) => b.rows - a.rows) };
+  return { snapshotDate, snapshotSource: parsedDates.length ? 'filename' : 'system', snapshotWarning,
+    records, executions, feeClaims, courses, issues, months, drugCatalog: [...catalogMap.values()].sort((a, b) => b.rows - a.rows) };
 }
 
 export interface PerformanceRow {
   campus: Campus;
+  rawNursing: number;
+  excludedNursing: number;
   nursing: number;
   pharmacy: number;
   medicalAffairs: number;
@@ -423,13 +451,18 @@ export function performance(analysis: Analysis, month: string, includedCodes: Se
   const eligible = analysis.executions.filter(event => includedCodes.has(event.drugCode) && (month === 'all' || event.month === month));
   return CAMPUSES.map(campus => {
     const events = eligible.filter(event => event.campus === campus);
-    const pharmacy = new Set(events.map(event => `${event.rowId}|${month === 'all' ? 'all' : event.month}`)).size;
+    const sourceRows = analysis.records.filter(row => row.campus === campus && includedCodes.has(row.drugCode) &&
+      row.executionCount > 0 && row.times.some(time => month === 'all' || reportingMonth(time) === month));
+    const pharmacy = sourceRows.reduce((sum, row) => sum + (month === 'all'
+      ? new Set(row.times.map(reportingMonth)).size : 1), 0);
+    const rawNursing = analysis.records.filter(row => row.campus === campus && includedCodes.has(row.drugCode))
+      .reduce((sum, row) => sum + row.times.filter(time => month === 'all' || reportingMonth(time) === month).length, 0);
     const medicalAffairs = analysis.feeClaims.filter(claim => claim.campus === campus && (month === 'all' || claim.month === month)).reduce((sum, claim) => sum + claim.count, 0);
     const nursing = events.length;
     const nursingPoints = nursing * POINTS.nursing;
     const pharmacyPoints = pharmacy * POINTS.pharmacy;
     const medicalAffairsPoints = medicalAffairs * POINTS.medicalAffairs;
     const round = (value: number) => Math.round(value * 1000) / 1000;
-    return { campus, nursing, pharmacy, medicalAffairs, nursingPoints: round(nursingPoints), pharmacyPoints: round(pharmacyPoints), medicalAffairsPoints: round(medicalAffairsPoints), totalPoints: round(nursingPoints + pharmacyPoints + medicalAffairsPoints) };
+    return { campus, rawNursing, excludedNursing: rawNursing - nursing, nursing, pharmacy, medicalAffairs, nursingPoints: round(nursingPoints), pharmacyPoints: round(pharmacyPoints), medicalAffairsPoints: round(medicalAffairsPoints), totalPoints: round(nursingPoints + pharmacyPoints + medicalAffairsPoints) };
   });
 }

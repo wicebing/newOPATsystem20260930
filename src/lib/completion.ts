@@ -19,7 +19,17 @@ export interface CourseProgress {
   expected: number;
   executed: number;
   lastScheduledDate: string;
-  status: '完成' | '未完成' | '進行中' | '中斷/轉診' | '資料不足';
+  status: '完成' | '未完成' | '進行中' | '待執行' | '中斷/轉診' | '資料不足';
+}
+
+export interface DailyComparison {
+  key: string;
+  name: string;
+  預定: number;
+  實際: number;
+  完成: number;
+  未完成: number;
+  額外施打: number;
 }
 
 export interface CompletionReport {
@@ -104,7 +114,7 @@ export function buildCompletion(analysis: Analysis, includedCodes: Set<string>, 
     let status: CourseProgress['status'];
     if (!days.length || invalidCourses.has(course.id)) status = '資料不足';
     else if (course.failed || course.transferred) status = '中斷/轉診';
-    else if (lastScheduledDate > asOf) status = '進行中';
+    else if (lastScheduledDate > asOf) status = expected === 0 && executed === 0 ? '待執行' : '進行中';
     else status = days.every(day => day.executed >= day.expected) ? '完成' : '未完成';
     return { courseId: course.id, campus: course.campus, chartNo: course.chartNo, openingMonth: course.openingMonth, expected, executed, lastScheduledDate, status };
   });
@@ -112,6 +122,40 @@ export function buildCompletion(analysis: Analysis, includedCodes: Set<string>, 
   const eligibleCourses = new Set(courses.filter(course => course.status !== '中斷/轉診' && course.status !== '資料不足').map(course => course.courseId));
   const dueDays = allDays.filter(day => day.date <= asOf && eligibleCourses.has(day.courseId));
   return { days: dueDays, courses, asOf };
+}
+
+export function dailyComparison(analysis: Analysis, report: CompletionReport, includedCodes: Set<string>, month = 'all', campus = '全部院區'): DailyComparison[] {
+  const days = new Map<string, DailyComparison>();
+  const dayFor = (date: string) => {
+    const found = days.get(date);
+    if (found) return found;
+    const item = { key: date, name: `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`,
+      預定: 0, 實際: 0, 完成: 0, 未完成: 0, 額外施打: 0 };
+    days.set(date, item);
+    return item;
+  };
+  report.days.filter(day => (month === 'all' || day.date.startsWith(month)) && (campus === '全部院區' || day.campus === campus))
+    .forEach(day => { dayFor(day.date).預定 += day.expected; dayFor(day.date).完成 += day.executed; });
+  analysis.executions.filter(event => includedCodes.has(event.drugCode) && event.date <= report.asOf &&
+    (month === 'all' || event.date.startsWith(month)) && (campus === '全部院區' || event.campus === campus))
+    .forEach(event => { dayFor(event.date).實際 += 1; });
+  const compared = [...days.values()].sort((a, b) => a.key.localeCompare(b.key)).map(item => ({
+    ...item, 未完成: Math.max(0, item.預定 - item.完成),
+    額外施打: Math.max(0, item.實際 - item.完成),
+  }));
+  if (month !== 'all') return compared;
+  const months = new Map<string, DailyComparison>();
+  compared.forEach(day => {
+    const key = day.key.slice(0, 7);
+    const item = months.get(key) || { key, name: key, 預定: 0, 實際: 0, 完成: 0, 未完成: 0, 額外施打: 0 };
+    item.預定 += day.預定;
+    item.實際 += day.實際;
+    item.完成 += day.完成;
+    item.未完成 += day.未完成;
+    item.額外施打 += day.額外施打;
+    months.set(key, item);
+  });
+  return [...months.values()];
 }
 
 export function summarizeCompletion(report: CompletionReport, month = 'all', campus = '全部院區'): CompletionSummary {
