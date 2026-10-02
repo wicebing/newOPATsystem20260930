@@ -10,6 +10,8 @@ export interface SourceFile {
 
 export interface RecordRow {
   id: string;
+  duplicateOf: string | null;
+  possibleDuplicateOf: string | null;
   file: string;
   rowNumber: number;
   raw: RawRow;
@@ -224,6 +226,81 @@ function addIssue(issues: DataIssue[], row: RecordRow, code: string, message: st
   issues.push({ code, level, message, rowId: row.id, account: row.account, campus: row.campus });
 }
 
+const ORDER_IDENTITY_COLUMNS = [
+  '帳號', '執行人員明細', '診療行為', '健保碼', '藥品八碼', '組合商品名',
+  '確認日期', '開始日', '結束日', '總數量', '天數', '頻率',
+];
+const ORDER_STATUS_COLUMNS = new Set(['轉急診日', '轉住院日', '失敗個案']);
+
+function orderIdentity(row: RecordRow): string {
+  return JSON.stringify([row.campus, row.chartNo, ...ORDER_IDENTITY_COLUMNS.map(column => value(row.raw[column]))]);
+}
+
+function differentOrderFields(left: RecordRow, right: RecordRow): string[] {
+  return [...new Set([...Object.keys(left.raw), ...Object.keys(right.raw)])]
+    .filter(column => !ORDER_STATUS_COLUMNS.has(column) && value(left.raw[column]) !== value(right.raw[column]));
+}
+
+function sameScheduledSingleDose(left: RecordRow, right: RecordRow): boolean {
+  return left.startDate !== null && left.endDate !== null &&
+    right.startDate !== null && right.endDate !== null &&
+    formatDate(left.startDate) === formatDate(left.endDate) &&
+    formatDate(right.startDate) === formatDate(right.endDate) &&
+    formatDate(left.startDate) === formatDate(right.startDate) &&
+    /^(QD|Q24H|ONCE|STAT)$/.test(left.frequency) &&
+    left.executionCount === 1 && right.executionCount === 1 &&
+    left.times.length === 1 && right.times.length === 1;
+}
+
+function scheduledDayDistance(row: RecordRow): number {
+  if (!row.startDate || !row.times[0]) return Infinity;
+  const scheduled = Date.UTC(row.startDate.getFullYear(), row.startDate.getMonth(), row.startDate.getDate());
+  const executed = row.times[0];
+  const actual = Date.UTC(executed.getFullYear(), executed.getMonth(), executed.getDate());
+  return Math.abs(actual - scheduled);
+}
+
+function markDuplicateOrders(records: RecordRow[], issues: DataIssue[]): void {
+  const groups = new Map<string, RecordRow[]>();
+  records.forEach(row => {
+    if (!row.account || !row.chartNo) return;
+    const key = orderIdentity(row);
+    const group = groups.get(key) || [];
+    group.push(row);
+    groups.set(key, group);
+  });
+
+  groups.forEach(group => {
+    const clusters: RecordRow[][] = [];
+    group.forEach(row => {
+      const cluster = clusters.find(items => {
+        const differences = differentOrderFields(items[0], row);
+        return differences.length === 0 ||
+          (differences.length === 1 && differences[0] === '執行次數明細' && sameScheduledSingleDose(items[0], row));
+      });
+      if (cluster) cluster.push(row);
+      else clusters.push([row]);
+    });
+    const kept = clusters.map(cluster => {
+      const canonical = cluster.reduce((best, row) => scheduledDayDistance(row) < scheduledDayDistance(best) ? row : best);
+      cluster.forEach(row => {
+        if (row === canonical) return;
+        row.duplicateOf = canonical.id;
+        const differentTimes = row.detail !== canonical.detail;
+        const reason = differentTimes ? '同一預定施打日的單次醫令，執行時間不同' : '同一醫令及施打明細';
+        addIssue(issues, row, 'duplicate-order', `與 ${canonical.file} #${canonical.rowNumber} 為${reason}；已排除重複計數，轉診與失敗註記仍保留`, 'warning');
+      });
+      return canonical;
+    });
+    kept.slice(1).forEach(row => {
+      const comparison = kept[0];
+      row.possibleDuplicateOf = comparison.id;
+      const differences = differentOrderFields(comparison, row);
+      addIssue(issues, row, 'possible-duplicate-order', `與 ${comparison.file} #${comparison.rowNumber} 的帳號、執行人員及醫令欄位相同，但 ${differences.join('、')} 不同；暫保留並請核對`);
+    });
+  });
+}
+
 export function analyze(files: SourceFile[]): Analysis {
   const issues: DataIssue[] = [];
   const records: RecordRow[] = [];
@@ -250,6 +327,8 @@ export function analyze(files: SourceFile[]): Analysis {
     const times = validEntries.map(entry => entry.time);
     const row: RecordRow = {
       id: `${fileIndex}:${index + 2}`,
+      duplicateOf: null,
+      possibleDuplicateOf: null,
       file: file.name,
       rowNumber: index + 2,
       raw,
@@ -291,6 +370,8 @@ export function analyze(files: SourceFile[]): Analysis {
     records.push(row);
   }));
 
+  markDuplicateOrders(records, issues);
+
   const accountKeys = [...new Set(records.map(row => `${row.campus}|${row.account}`))];
   const parent = new Map(accountKeys.map(key => [key, key]));
   const find = (key: string): string => {
@@ -324,7 +405,7 @@ export function analyze(files: SourceFile[]): Analysis {
   records.forEach(row => { row.courseId = find(`${row.campus}|${row.account}`); });
 
   const executionMap = new Map<string, Execution>();
-  records.forEach(row => row.times.forEach((time, index) => {
+  records.filter(row => !row.duplicateOf).forEach(row => row.times.forEach((time, index) => {
     const key = `${row.courseId}|${row.drugCode}|${time.getTime()}`;
     const prior = executionMap.get(key);
     if (prior) {
@@ -452,7 +533,7 @@ export function performance(analysis: Analysis, month: string, includedCodes: Se
   const eligible = analysis.executions.filter(event => includedCodes.has(event.drugCode) && (month === 'all' || event.month === month));
   return CAMPUSES.map(campus => {
     const events = eligible.filter(event => event.campus === campus);
-    const sourceRows = analysis.records.filter(row => row.campus === campus && includedCodes.has(row.drugCode) &&
+    const sourceRows = analysis.records.filter(row => !row.duplicateOf && row.campus === campus && includedCodes.has(row.drugCode) &&
       row.executionCount > 0 && row.times.some(time => month === 'all' || reportingMonth(time) === month));
     const pharmacy = sourceRows.reduce((sum, row) => sum + (month === 'all'
       ? new Set(row.times.map(reportingMonth)).size : 1), 0);

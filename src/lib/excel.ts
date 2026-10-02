@@ -56,7 +56,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     來源檔案: recordById.get(event.rowId)?.file || '',
     來源列號: recordById.get(event.rowId)?.rowNumber || '',
   }));
-  const legacyCleaned = analysis.records.filter(row => includedCodes.has(row.drugCode) && (row.kind === 'injectable-antibiotic' || row.kind === 'review') &&
+  const legacyCleaned = analysis.records.filter(row => !row.duplicateOf && includedCodes.has(row.drugCode) && (row.kind === 'injectable-antibiotic' || row.kind === 'review') &&
     (campus === '全部院區' || row.campus === campus) && (month === 'all' || row.times.some(time => reportingMonth(time) === month) ||
       (row.startDate && formatDate(row.startDate).slice(0, 7) <= month && formatDate(row.endDate || row.startDate).slice(0, 7) >= month)))
     .map(row => ({ ...row.raw, 院區: row.campus }));
@@ -108,6 +108,27 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     院區: issue.campus, 帳號: issue.account, 類型: issue.code,
     說明: issue.message, 原始列: issue.rowId,
   }));
+  const duplicateRows = analysis.records.filter(row => (row.duplicateOf || row.possibleDuplicateOf) &&
+    (campus === '全部院區' || row.campus === campus) &&
+    (month === 'all' || row.times.some(time => reportingMonth(time) === month) ||
+      row.confirmDate && formatDate(row.confirmDate).startsWith(month) ||
+      row.startDate && formatDate(row.startDate).startsWith(month))).map(row => {
+    const counterpart = recordById.get(row.duplicateOf || row.possibleDuplicateOf || '');
+    return {
+      判定: row.duplicateOf ? '已排除重複列' : '待核對，暫保留', 院區: row.campus,
+      差異欄位: counterpart ? [...new Set([...Object.keys(row.raw), ...Object.keys(counterpart.raw)])]
+        .filter(column => String(row.raw[column] ?? '').trim() !== String(counterpart.raw[column] ?? '').trim()).join('、') : '',
+      帳號: row.account, 病歷號: row.chartNo, 執行人員明細: row.executorDetail,
+      診療行為: row.treatment, 健保碼: row.raw['健保碼'], 藥品八碼: row.drugCode,
+      組合商品名: row.drugName, 確認日期: row.raw['確認日期'], 開始日: row.raw['開始日'],
+      結束日: row.raw['結束日'], 總數量: row.raw['總數量'], 天數: row.raw['天數'],
+      頻率: row.frequency, 執行次數: row.executionCount, 執行次數明細: row.detail,
+      對照執行次數明細: counterpart?.detail || '',
+      轉急診日: row.raw['轉急診日'], 轉住院日: row.raw['轉住院日'], 失敗個案: row.raw['失敗個案'],
+      來源檔案: row.file, 來源列號: row.rowNumber,
+      對照檔案: counterpart?.file || '', 對照列號: counterpart?.rowNumber || '',
+    };
+  });
   const append = (name: string, values: Record<string, unknown>[], emptyHeaders: string[]) => {
     const sheet = values.length ? XLSX.utils.json_to_sheet(values) : XLSX.utils.aoa_to_sheet([emptyHeaders]);
     sheet['!autofilter'] = { ref: sheet['!ref'] || 'A1' };
@@ -124,6 +145,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
   append('療程明細', courseRows, ['院區', '病歷號', '帳號', '完成狀態']);
   append('排程對照', scheduleRows, ['院區', '病歷號', '日期', '預定次數', '實際次數']);
   append('Step1清理資料', legacyCleaned, Object.keys(analysis.records[0]?.raw || { 帳號: '', 病歷號: '', 院區: '' }));
+  append('重複醫令核對', duplicateRows, ['判定', '差異欄位', '院區', '帳號', '執行人員明細', '藥品八碼', '執行次數明細', '對照執行次數明細', '來源檔案', '來源列號', '對照檔案', '對照列號']);
   append('資料檢核', issues, ['院區', '帳號', '類型', '說明', '原始列']);
   return workbook;
 }

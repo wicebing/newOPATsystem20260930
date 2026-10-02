@@ -71,7 +71,7 @@ export function buildCompletion(analysis: Analysis, includedCodes: Set<string>, 
   const asOf = formatDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
   const scheduled = new Map<string, ScheduledDay>();
   const invalidCourses = new Set<string>();
-  const eligibleRows = analysis.records.filter(row => isScheduled(row, includedCodes));
+  const eligibleRows = analysis.records.filter(row => !row.duplicateOf && isScheduled(row, includedCodes));
 
   eligibleRows.forEach(row => {
     const expected = dailyExpected(row.frequency);

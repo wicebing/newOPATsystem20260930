@@ -20,7 +20,7 @@ describe('Excel report', () => {
     const workbook = createReportWorkbook(analysis, report, '2026-07', '竹東', included, completion);
 
     expect(workbook.SheetNames).toEqual(['績效總表', '完成率', 'Step2原系統格式', '執行人員統計', '施打時段', '醫師開立偏好',
-      '施打明細', '療程明細', '排程對照', 'Step1清理資料', '資料檢核']);
+      '施打明細', '療程明細', '排程對照', 'Step1清理資料', '重複醫令核對', '資料檢核']);
     const detail = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['施打明細']);
     expect(detail[0]).toMatchObject({ 院區: '竹東', 病歷號: 'G000001', 執行人員代碼: 'G00001', 執行人員: '王甲乙' });
     const legacy = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Step1清理資料']);
@@ -35,5 +35,26 @@ describe('Excel report', () => {
     expect(prescribing[0]).toMatchObject({ 醫師: '測試醫師', 醫師OPAT療程數: 1, 此藥療程數: 1, '開立比例(%)': 100 });
     const completionRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['完成率']);
     expect(completionRows[0]).toMatchObject({ 資料快照日: '2026-07-25', 預定施打: 2, 已完成施打: 1, '施打完成率(%)': 50 });
+  });
+
+  it('exports one cleaned order and a traceable duplicate comparison', () => {
+    const original = {
+      帳號: '26T70000001', 病歷號: 'G000001', 院區: '竹東',
+      診療行為: '門診轉OPAT「D2-D7」', 健保碼: 'AB36751277',
+      組合商品名: 'Sintrix 500 mg/vial', 藥品八碼: 'SIN1AB20',
+      執行人員明細: 'G00001王甲乙', 頻率: 'QD', 執行次數: 1,
+      執行次數明細: '2026/07/23 09:00', 開始日: '20260723',
+      結束日: '20260723', 確認日期: '20260723',
+      '39029C管理費數量': 1,
+    };
+    const analysis = analyze([{ name: '1150725_OPAT個案資料g.xlsx', rows: [original, { ...original, 執行次數明細: '2026/07/23 09:02' }] }]);
+    const included = new Set(['SIN1AB20']);
+    const workbook = createReportWorkbook(analysis, performance(analysis, '2026-07', included), '2026-07', '竹東', included,
+      buildCompletion(analysis, included, new Date(2026, 6, 25)));
+    expect(XLSX.utils.sheet_to_json(workbook.Sheets['Step1清理資料'])).toHaveLength(1);
+    expect(XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['重複醫令核對'])[0])
+      .toMatchObject({ 判定: '已排除重複列', 開始日: '20260723', 結束日: '20260723', 來源列號: 3, 對照列號: 2 });
+    expect(XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Step2原系統格式'])[0])
+      .toMatchObject({ nursing: 1, pharmacy: 1 });
   });
 });

@@ -121,6 +121,7 @@ export default function App() {
   const [includedCodes, setIncludedCodes] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [issueFilter, setIssueFilter] = useState('all');
+  const [duplicatePage, setDuplicatePage] = useState(1);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [selectedExecutorKey, setSelectedExecutorKey] = useState<string | null>(null);
   const [showAllDoctors, setShowAllDoctors] = useState(false);
@@ -140,6 +141,7 @@ export default function App() {
       setIncludedCodes(new Set(result.drugCatalog.filter(drug => drug.kind === 'injectable-antibiotic').map(drug => drug.code)));
       setMonth(result.months.at(-1) || 'all');
       setIssueFilter('all');
+      setDuplicatePage(1);
       setSelectedCourseId(null);
       setSelectedExecutorKey(null);
       setExecutorPage(1);
@@ -253,8 +255,14 @@ export default function App() {
   const selectedIssues = data?.issues.filter(issue =>
     (campus === '全部院區' || issue.campus === campus) &&
     (issueFilter === 'all' || issue.code === issueFilter) &&
-    (month === 'all' || data.records.some(row => row.id === issue.rowId && (row.times.some(time => reportingMonth(time) === month) || row.confirmDate && formatDate(row.confirmDate).startsWith(month)))),
+    (month === 'all' || data.records.some(row => row.id === issue.rowId && (row.times.some(time => reportingMonth(time) === month) || row.confirmDate && formatDate(row.confirmDate).startsWith(month) || row.startDate && formatDate(row.startDate).startsWith(month)))),
   ) || [];
+  const recordById = useMemo(() => new Map(data?.records.map(row => [row.id, row]) || []), [data]);
+  const duplicateRows = data?.records.filter(row => (row.duplicateOf || row.possibleDuplicateOf) &&
+    (campus === '全部院區' || row.campus === campus) &&
+    (month === 'all' || row.times.some(time => reportingMonth(time) === month) ||
+      row.confirmDate && formatDate(row.confirmDate).startsWith(month) ||
+      row.startDate && formatDate(row.startDate).startsWith(month))) || [];
 
   const trend = useMemo(() => {
     const groups = new Map<string, Record<string, string | number>>();
@@ -342,7 +350,7 @@ export default function App() {
   const issueCodes = data ? [...new Set(data.issues.map(issue => issue.code))].sort() : [];
 
   const choose = () => fileInput.current?.click();
-  const switchView = (next: View) => { setView(next); setSearch(''); setPage(1); };
+  const switchView = (next: View) => { setView(next); setSearch(''); setPage(1); setDuplicatePage(1); };
   const toggleDrug = (code: string) => setIncludedCodes(previous => {
     const next = new Set(previous);
     if (next.has(code)) next.delete(code);
@@ -369,7 +377,7 @@ export default function App() {
       <div className="mobile-nav">{NAV.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => switchView(item.id)}>{item.label}</button>)}</div>
       <div className="content">
         <div className="page-heading"><div><p className="eyebrow">OPAT REPORTING</p><h1>{NAV.find(item => item.id === view)?.label}</h1><p className="page-subtitle">{data ? `已載入 ${number(data.records.length)} 筆原始資料、${number(data.courses.length)} 個療程 · 資料快照 ${formatDate(data.snapshotDate)}${data.snapshotSource === 'system' ? '（系統日期）' : ''}` : '匯入原始個案資料後即可檢視分析'}</p></div>
-          {data && <div className="filters"><label><span>績效月份</span><select value={month} onChange={event => { setMonth(event.target.value); setPage(1); }}><option value="all">全部期間</option>{data.months.map(key => <option key={key} value={key}>{key}</option>)}</select><ChevronDown size={15} /></label><label><span>院區</span><select value={campus} onChange={event => { setCampus(event.target.value as Campus | '全部院區'); setPage(1); }}><option>全部院區</option>{CAMPUSES.map(name => <option key={name}>{name}</option>)}</select><ChevronDown size={15} /></label></div>}
+          {data && <div className="filters"><label><span>績效月份</span><select value={month} onChange={event => { setMonth(event.target.value); setPage(1); setDuplicatePage(1); }}><option value="all">全部期間</option>{data.months.map(key => <option key={key} value={key}>{key}</option>)}</select><ChevronDown size={15} /></label><label><span>院區</span><select value={campus} onChange={event => { setCampus(event.target.value as Campus | '全部院區'); setPage(1); setDuplicatePage(1); }}><option>全部院區</option>{CAMPUSES.map(name => <option key={name}>{name}</option>)}</select><ChevronDown size={15} /></label></div>}
         </div>
 
         {error && <div className="error-banner"><AlertTriangle size={18} />{error}<button onClick={() => setError('')} aria-label="關閉錯誤"><X size={16} /></button></div>}
@@ -456,7 +464,7 @@ export default function App() {
               {statLine('醫事點數', number(total.medicalAffairs * POINTS.medicalAffairs, 2), '#8b65a3', ClipboardList)}
             </div>
             <Section title="各職類績效" detail="施打與藥品保管按 08:00 切月；無執行時間的管理費依確認日期歸月"><div className="table-scroll"><table className="performance-table"><thead><tr><th>院區</th><th className="numeric">原始施打</th><th className="numeric">排除重複/超頻</th><th className="numeric">護理次數</th><th className="numeric">護理點數</th><th className="numeric">藥劑筆數</th><th className="numeric">藥劑點數</th><th className="numeric">管理費申報</th><th className="numeric">醫事點數</th><th className="numeric">總點數</th></tr></thead><tbody>{visibleReport.map(row => <tr key={row.campus}><td className="emph">{row.campus}</td><td className="numeric">{number(row.rawNursing)}</td><td className="numeric">{number(row.excludedNursing)}</td><td className="numeric">{number(row.nursing)}</td><td className="numeric">{number(row.nursingPoints, 2)}</td><td className="numeric">{number(row.pharmacy)}</td><td className="numeric">{number(row.pharmacyPoints, 2)}</td><td className="numeric">{number(row.medicalAffairs)}</td><td className="numeric">{number(row.medicalAffairsPoints, 3)}</td><td className="numeric emph">{number(row.totalPoints, 3)}</td></tr>)}</tbody><tfoot><tr><td>合計</td><td className="numeric">{number(visibleReport.reduce((sum, row) => sum + row.rawNursing, 0))}</td><td className="numeric">{number(visibleReport.reduce((sum, row) => sum + row.excludedNursing, 0))}</td><td className="numeric">{number(total.nursing)}</td><td className="numeric">{number(total.nursing * POINTS.nursing, 2)}</td><td className="numeric">{number(total.pharmacy)}</td><td className="numeric">{number(total.pharmacy * POINTS.pharmacy, 2)}</td><td className="numeric">{number(total.medicalAffairs)}</td><td className="numeric">{number(total.medicalAffairs * POINTS.medicalAffairs, 3)}</td><td className="numeric">{number(total.totalPoints, 3)}</td></tr></tfoot></table></div><p className="method-note">原始施打保留來源明細供對帳；護理點數採排除相同療程、藥品、時間與超過頻率上限後的有效施打。</p></Section>
-            <div className="two-column wide-left"><Section title="每月點數趨勢"><Chart empty={!monthlyPoints.length}><ResponsiveContainer width="100%" height="100%"><AreaChart data={monthlyPoints} margin={{ top: 12, right: 14, left: -15, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={16} tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend /><Area dataKey="護理" stackId="a" stroke={COLORS[0]} fill={COLORS[0]} /><Area dataKey="藥劑" stackId="a" stroke={COLORS[1]} fill={COLORS[1]} /><Area dataKey="醫事" stackId="a" stroke={COLORS[2]} fill={COLORS[2]} /></AreaChart></ResponsiveContainer></Chart></Section><Section title="計算依據"><div className="rules"><div><Activity size={19} /><strong>護理</strong><span>注射抗生素逐次執行 × 0.1 點</span></div><div><Pill size={19} /><strong>藥劑</strong><span>有執行的藥品原始列 × 0.05 點</span></div><div><ClipboardList size={19} /><strong>醫事</strong><span>非 D1 帳號管理費申報 × 0.025 點</span></div><p>相同療程、藥品、時間只計一次施打；跨月原始列在各有執行的月份各計一筆保管。</p></div></Section></div>
+            <div className="two-column wide-left"><Section title="每月點數趨勢"><Chart empty={!monthlyPoints.length}><ResponsiveContainer width="100%" height="100%"><AreaChart data={monthlyPoints} margin={{ top: 12, right: 14, left: -15, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={16} tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend /><Area dataKey="護理" stackId="a" stroke={COLORS[0]} fill={COLORS[0]} /><Area dataKey="藥劑" stackId="a" stroke={COLORS[1]} fill={COLORS[1]} /><Area dataKey="醫事" stackId="a" stroke={COLORS[2]} fill={COLORS[2]} /></AreaChart></ResponsiveContainer></Chart></Section><Section title="計算依據"><div className="rules"><div><Activity size={19} /><strong>護理</strong><span>注射抗生素逐次執行 × 0.1 點</span></div><div><Pill size={19} /><strong>藥劑</strong><span>有執行的去重藥品列 × 0.05 點</span></div><div><ClipboardList size={19} /><strong>醫事</strong><span>非 D1 帳號管理費申報 × 0.025 點</span></div><p>同醫令、同施打明細或同一預定日的 QD 單次施打先去重；跨月醫令在各有執行的月份各計一筆保管。</p></div></Section></div>
           </>}
 
           {view === 'cases' && <>
@@ -465,8 +473,9 @@ export default function App() {
           </>}
 
           {view === 'audit' && <>
-            <div className="stats-grid three">{statLine('待檢核項目', number(selectedIssues.length), '#e57443', AlertTriangle)}{statLine('重複施打紀錄', number(selectedIssues.filter(issue => issue.code === 'duplicate').length), '#8b65a3', Filter)}{statLine('退量與執行並存', number(selectedIssues.filter(issue => issue.code === 'refund-execution').length), '#087c72', Check)}</div>
+            <div className="stats-grid">{statLine('待檢核項目', number(selectedIssues.length), '#e57443', AlertTriangle)}{statLine('已排除重複醫令', number(duplicateRows.filter(row => row.duplicateOf).length), '#8b65a3', Filter)}{statLine('相似醫令待核對', number(duplicateRows.filter(row => row.possibleDuplicateOf).length), '#d6a637', AlertTriangle)}{statLine('退量與執行並存', number(selectedIssues.filter(issue => issue.code === 'refund-execution').length), '#087c72', Check)}</div>
             <Section title="藥品分類" detail="預設只納入已確認的注射抗生素；新藥品可在此勾選納入護理與藥劑計算"><div className="drug-list">{data.drugCatalog.map(drug => <label className="drug-item" key={drug.code || drug.name}><input type="checkbox" checked={includedCodes.has(drug.code)} onChange={() => toggleDrug(drug.code)} /><span className="drug-check"><Check size={13} /></span><span className="drug-main"><strong>{drug.name}</strong><small>{drug.code || '無藥品碼'} · {number(drug.rows)} 列</small></span><span className={`kind kind-${drug.kind}`}>{drug.kind === 'injectable-antibiotic' ? '注射抗生素' : drug.kind === 'diluent' ? '稀釋液' : drug.kind === 'review' ? '待確認' : '其他藥品'}</span></label>)}</div></Section>
+            <Section title="重複醫令核對" detail={`共 ${number(duplicateRows.length)} 列；已排除者不重複計入護理、藥劑及排程`}><div className="table-scroll"><table><thead><tr><th>判定</th><th>院區</th><th>帳號</th><th>執行人員明細</th><th>藥品</th><th>開始日</th><th>結束日</th><th>執行次數明細</th><th>對照執行明細</th><th>來源列</th><th>對照列</th></tr></thead><tbody>{duplicateRows.slice((duplicatePage - 1) * pageSize, duplicatePage * pageSize).map(row => { const counterpart = recordById.get(row.duplicateOf || row.possibleDuplicateOf || ''); return <tr key={row.id}><td><span className={`status ${row.duplicateOf ? 'neutral' : 'danger'}`}>{row.duplicateOf ? '已排除' : '待核對'}</span></td><td>{row.campus}</td><td className="mono">{row.account}</td><td>{row.executorDetail || '—'}</td><td>{row.drugName}</td><td className="nowrap">{formatDate(row.startDate)}</td><td className="nowrap">{formatDate(row.endDate)}</td><td className="nowrap">{row.detail || '—'}</td><td className="nowrap">{counterpart?.detail || '—'}</td><td className="mono nowrap">{row.file} #{row.rowNumber}</td><td className="mono nowrap">{counterpart?.file} #{counterpart?.rowNumber}</td></tr>; })}</tbody></table></div><Pagination page={duplicatePage} total={duplicateRows.length} size={pageSize} onChange={setDuplicatePage} /></Section>
             <Section title="異常與核對" detail={`共 ${number(selectedIssues.length)} 項；來源列可與原始 Excel 比對`} action={<label className="issue-select"><select value={issueFilter} onChange={event => { setIssueFilter(event.target.value); setPage(1); }}><option value="all">全部類型</option>{issueCodes.map(code => <option key={code}>{code}</option>)}</select><ChevronDown size={15} /></label>}><div className="table-scroll"><table><thead><tr><th>類型</th><th>院區</th><th>帳號</th><th>說明</th><th>來源列</th></tr></thead><tbody>{selectedIssues.slice((page - 1) * pageSize, page * pageSize).map((issue: DataIssue, index) => <tr key={`${issue.rowId}-${issue.code}-${index}`}><td><span className={`status ${issue.level === 'warning' ? 'neutral' : 'danger'}`}>{issue.code}</span></td><td>{issue.campus}</td><td className="mono">{issue.account}</td><td>{issue.message}</td><td className="mono">{data.records.find(row => row.id === issue.rowId)?.file}　#{data.records.find(row => row.id === issue.rowId)?.rowNumber}</td></tr>)}</tbody></table></div><Pagination page={page} total={selectedIssues.length} size={pageSize} onChange={setPage} /></Section>
           </>}
         </>}

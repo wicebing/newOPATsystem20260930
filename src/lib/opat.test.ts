@@ -106,6 +106,51 @@ describe('OPAT calculation', () => {
     expect(data.issues.some(issue => issue.code === 'executor-conflict')).toBe(true);
   });
 
+  it('removes repeated order rows from nursing and pharmacy while retaining status evidence', () => {
+    const original = row({ 執行人員明細: 'G00001王甲乙', 開始日: '20260723', 結束日: '20260723', '39029C管理費數量': 1 });
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      original,
+      { ...original, 轉急診日: '20260724', 失敗個案: 'Y' },
+    ] }]);
+    const points = performance(data, '2026-07', new Set(['SIN1AB20'])).find(item => item.campus === '竹東');
+    expect(points).toMatchObject({ nursing: 1, pharmacy: 1, medicalAffairs: 0 });
+    expect(data.records[1].duplicateOf).toBe(data.records[0].id);
+    expect(data.courses[0]).toMatchObject({ transferred: true, failed: true });
+    expect(data.issues.filter(issue => issue.code === 'duplicate-order')).toHaveLength(1);
+  });
+
+  it('uses a single-day QD schedule to merge different or mistyped execution dates', () => {
+    const shared = { 執行人員明細: 'G00001王甲乙', 開始日: '20260723', 結束日: '20260723', 執行次數: 1 };
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ ...shared, 執行次數明細: '2026/07/24 09:00' }),
+      row({ ...shared, 執行次數明細: '2026/07/23 09:02' }),
+    ] }]);
+    expect(data.records[0].duplicateOf).toBe(data.records[1].id);
+    expect(data.executions.map(event => formatDate(event.time, true))).toEqual(['2026-07-23 09:02']);
+    expect(performance(data, '2026-07', new Set(['SIN1AB20'])).find(item => item.campus === '竹東'))
+      .toMatchObject({ nursing: 1, pharmacy: 1 });
+  });
+
+  it('keeps Q12H and multi-day administrations with distinct timestamps for review', () => {
+    const q12h = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ 頻率: 'Q12H', 開始日: '20260723', 結束日: '20260723', 執行人員明細: 'G00001王甲乙', 執行次數明細: '2026/07/23 09:00' }),
+      row({ 頻率: 'Q12H', 開始日: '20260723', 結束日: '20260723', 執行人員明細: 'G00001王甲乙', 執行次數明細: '2026/07/23 21:00' }),
+    ] }]);
+    expect(q12h.records[1].duplicateOf).toBeNull();
+    expect(q12h.records[1].possibleDuplicateOf).toBe(q12h.records[0].id);
+    expect(performance(q12h, '2026-07', new Set(['SIN1AB20'])).find(item => item.campus === '竹東'))
+      .toMatchObject({ nursing: 2, pharmacy: 2 });
+
+    const multiDay = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ 開始日: '20260723', 結束日: '20260724', 執行人員明細: 'G00001王甲乙', 執行次數明細: '2026/07/23 09:00' }),
+      row({ 開始日: '20260723', 結束日: '20260724', 執行人員明細: 'G00001王甲乙', 執行次數明細: '2026/07/24 09:00' }),
+    ] }]);
+    expect(multiDay.records[1].duplicateOf).toBeNull();
+    expect(multiDay.records[1].possibleDuplicateOf).toBe(multiDay.records[0].id);
+    expect(performance(multiDay, '2026-07', new Set(['SIN1AB20'])).find(item => item.campus === '竹東'))
+      .toMatchObject({ nursing: 2, pharmacy: 2 });
+  });
+
   it('uses the ROC download date in a filename as the snapshot, even when multiple files are loaded', () => {
     expect(formatDate(snapshotDateFromFilename('1150908_OPAT個案資料h.xlsx'))).toBe('2026-09-08');
     expect(formatDate(snapshotDateFromFilename('20260908_OPAT個案資料g.xlsx'))).toBe('2026-09-08');
