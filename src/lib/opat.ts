@@ -1,5 +1,6 @@
 export type RawRow = Record<string, unknown>;
 export type Campus = '新竹' | '竹北' | '竹東' | '未判定';
+export type KnownCampus = Exclude<Campus, '未判定'>;
 export type DrugKind = 'injectable-antibiotic' | 'diluent' | 'other' | 'review';
 
 export interface SourceFile {
@@ -117,7 +118,7 @@ export interface Analysis {
   drugCatalog: { code: string; name: string; kind: DrugKind; rows: number }[];
 }
 
-export const CAMPUSES: Campus[] = ['新竹', '竹北', '竹東'];
+export const CAMPUSES: KnownCampus[] = ['新竹', '竹北', '竹東'];
 export const POINTS = { nursing: 0.1, pharmacy: 0.05, medicalAffairs: 0.025 };
 
 export function courseStatus(course: Course, today = new Date()): '失敗標記' | '轉診' | '有執行' | '待施行' | '未執行' | '排程中' {
@@ -199,7 +200,7 @@ export function classifyDrug(code: string, name: string): DrugKind {
 
 function campusFor(row: RawRow, file: string): Campus {
   const supplied = value(row['院區']);
-  if (CAMPUSES.includes(supplied as Campus)) return supplied as Campus;
+  if (CAMPUSES.includes(supplied as KnownCampus)) return supplied as KnownCampus;
   const account = value(row['帳號']);
   const chartNo = value(row['病歷號']);
   if (/個案資料h(?:\.[^.]+)?$/i.test(file) || /^\d{2}T4/.test(account) || /^H/i.test(chartNo)) return '新竹';

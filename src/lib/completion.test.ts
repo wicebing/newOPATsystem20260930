@@ -79,11 +79,11 @@ describe('scheduled injection completion', () => {
     ] }]);
     const report = buildCompletion(data, included, data.snapshotDate);
     expect(dailyComparison(data, report, included, '2026-09', '竹東')).toEqual([
-      expect.objectContaining({ key: '2026-09-06', 預定: 1, 實際: 1, 完成: 1, 未完成: 0, 額外施打: 0 }),
-      expect.objectContaining({ key: '2026-09-07', 預定: 1, 實際: 1, 完成: 0, 未完成: 1, 額外施打: 1 }),
+      expect.objectContaining({ key: '2026-09-06', 預定: 1, 實際: 1, 完成: 1, 未完成: 0, 未對應排程: 0 }),
+      expect.objectContaining({ key: '2026-09-07', 預定: 1, 實際: 1, 完成: 0, 未完成: 1, 未對應排程: 1 }),
     ]);
     expect(dailyComparison(data, report, included, 'all', '竹東')[0]).toMatchObject({
-      key: '2026-09', 預定: 2, 實際: 2, 完成: 1, 未完成: 1, 額外施打: 1,
+      key: '2026-09', 預定: 2, 實際: 2, 完成: 1, 未完成: 1, 未對應排程: 1,
     });
   });
 });

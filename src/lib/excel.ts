@@ -1,7 +1,8 @@
 import * as XLSX from 'xlsx';
-import type { Analysis, PerformanceRow, SourceFile } from './opat';
+import type { Analysis, Campus, PerformanceRow, SourceFile } from './opat';
 import { formatDate, reportingMonth } from './opat';
 import { groupExecutors } from './staff';
+import { hourlyByCampus, prescribingMatrix } from './analytics';
 import { summarizeCompletion } from './completion';
 import type { CompletionReport } from './completion';
 
@@ -26,7 +27,7 @@ export async function readExcelFiles(files: File[]): Promise<SourceFile[]> {
   return sources;
 }
 
-export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[], month: string, campus: string, includedCodes: Set<string>, completion: CompletionReport): XLSX.WorkBook {
+export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[], month: string, campus: Campus | '全部院區', includedCodes: Set<string>, completion: CompletionReport): XLSX.WorkBook {
   const workbook = XLSX.utils.book_new();
   const recordById = new Map(analysis.records.map(row => [row.id, row]));
   const courseById = new Map(analysis.courses.map(course => [course.id, course]));
@@ -65,6 +66,14 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     施打次數: person.executions, 病人數: person.patients, 療程數: person.courses,
     藥品種類: person.drugs, 首次施打: formatDate(person.first, true), 最後施打: formatDate(person.last, true),
   }));
+  const hourlyRows = hourlyByCampus(selectedEvents).map(item => ({ 時段: item.name, 新竹: item.新竹, 竹北: item.竹北, 竹東: item.竹東, 合計: item.total }));
+  const matrix = prescribingMatrix(analysis, includedCodes, month, campus);
+  const prescribingRows = matrix.doctors.flatMap(doctor => matrix.drugs.map(drug => ({
+    開案月份: month === 'all' ? '全部期間' : month, 院區: doctor.campus, 科別: doctor.department, 醫師: doctor.doctor,
+    醫師OPAT療程數: doctor.courses, 藥品八碼: drug.code, 組合商品名: drug.name,
+    此藥療程數: doctor.byDrug[drug.code]?.courses || 0,
+    '開立比例(%)': Math.round((doctor.byDrug[drug.code]?.rate || 0) * 1000) / 10,
+  })));
   const completionRows = (campus === '全部院區' ? ['全部院區', '新竹', '竹北', '竹東'] : [campus]).map(name => {
     const result = summarizeCompletion(completion, month, name);
     return { 月份: month === 'all' ? '全部期間' : month, 院區: name, 資料快照日: formatDate(analysis.snapshotDate), 截至: completion.asOf,
@@ -109,6 +118,8 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
   append('完成率', completionRows, ['月份', '院區', '預定施打', '已完成施打']);
   append('Step2原系統格式', legacyPerformance, ['campus', 'nursing', 'pharmacy', 'medicalAffairs']);
   append('執行人員統計', executors, ['院區', '人員代碼', '執行人員', '施打次數']);
+  append('施打時段', hourlyRows, ['時段', '新竹', '竹北', '竹東', '合計']);
+  append('醫師開立偏好', prescribingRows, ['開案月份', '院區', '醫師', '醫師OPAT療程數', '藥品八碼', '此藥療程數', '開立比例(%)']);
   append('施打明細', executions, ['院區', '帳號', '病歷號', '執行人員代碼', '執行人員', '執行時間']);
   append('療程明細', courseRows, ['院區', '病歷號', '帳號', '完成狀態']);
   append('排程對照', scheduleRows, ['院區', '病歷號', '日期', '預定次數', '實際次數']);
@@ -117,7 +128,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
   return workbook;
 }
 
-export function downloadReport(analysis: Analysis, rows: PerformanceRow[], month: string, campus: string, includedCodes: Set<string>, completion: CompletionReport) {
+export function downloadReport(analysis: Analysis, rows: PerformanceRow[], month: string, campus: Campus | '全部院區', includedCodes: Set<string>, completion: CompletionReport) {
   const workbook = createReportWorkbook(analysis, rows, month, campus, includedCodes, completion);
   XLSX.writeFile(workbook, `OPAT_${month === 'all' ? '全部期間' : month}_${campus}.xlsx`);
 }

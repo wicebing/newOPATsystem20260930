@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, Legend,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, LabelList, Legend,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
@@ -17,6 +17,8 @@ import type { Analysis, Campus, DataIssue } from './lib/opat';
 import { buildCompletion, dailyComparison, summarizeCompletion } from './lib/completion';
 import type { DailyComparison } from './lib/completion';
 import { executorKey, groupExecutors } from './lib/staff';
+import { hourlyByCampus, prescribingMatrix } from './lib/analytics';
+import type { HourlyRow } from './lib/analytics';
 
 type View = 'overview' | 'execution' | 'staff' | 'performance' | 'cases' | 'audit';
 const COLORS = ['#087c72', '#e57443', '#8b65a3', '#d6a637', '#5c92b3', '#9ba8a4'];
@@ -64,11 +66,29 @@ function TooltipContent({ active, payload, label }: { active?: boolean; payload?
 function ComparisonTooltip({ active, payload }: { active?: boolean; payload?: { payload?: DailyComparison }[] }) {
   const item = payload?.[0]?.payload;
   if (!active || !item) return null;
-  return <div className="chart-tooltip"><strong>{item.key}</strong><span>預定　{number(item.預定)}</span><span>實際　{number(item.實際)}</span><span style={{ color: COLORS[1] }}>未完成　{number(item.未完成)}</span><span style={{ color: COLORS[2] }}>額外施打　{number(item.額外施打)}</span></div>;
+  return <div className="chart-tooltip"><strong>{item.key}</strong><span>預定　{number(item.預定)}</span><span>實際　{number(item.實際)}</span><span style={{ color: COLORS[1] }}>未完成　{number(item.未完成)}</span><span style={{ color: COLORS[2] }}>未對應排程　{number(item.未對應排程)}</span></div>;
 }
 
 function ComparisonChart({ values }: { values: DailyComparison[] }) {
-  return <Chart empty={!values.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={values} margin={{ top: 12, right: 8, left: -22, bottom: 0 }} barCategoryGap="25%"><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={20} tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} domain={[0, 'auto']} tick={{ fontSize: 11 }} /><Tooltip content={<ComparisonTooltip />} /><Legend /><Bar dataKey="完成" stackId="dose" fill={COLORS[0]} /><Bar dataKey="未完成" stackId="dose" fill={COLORS[1]} /><Bar dataKey="額外施打" stackId="dose" fill={COLORS[2]} /></BarChart></ResponsiveContainer></Chart>;
+  return <Chart empty={!values.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={values} margin={{ top: 12, right: 8, left: -22, bottom: 0 }} barCategoryGap="25%"><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={20} tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} domain={[0, 'auto']} tick={{ fontSize: 11 }} /><Tooltip content={<ComparisonTooltip />} /><Legend /><Bar dataKey="完成" stackId="dose" fill={COLORS[0]} /><Bar dataKey="未完成" stackId="dose" fill={COLORS[1]} /><Bar dataKey="未對應排程" stackId="dose" fill={COLORS[2]} /></BarChart></ResponsiveContainer></Chart>;
+}
+
+function RankedBars({ values, color, axisWidth }: { values: { name: string; value: number; label: string }[]; color: string; axisWidth: number }) {
+  return <Chart empty={!values.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={values} layout="vertical" margin={{ top: 8, right: 92, left: 4, bottom: 8 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={axisWidth} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="value" name="數量" fill={color} radius={[0, 3, 3, 0]}><LabelList dataKey="label" position="right" fill="#3e5651" fontSize={11} /></Bar></BarChart></ResponsiveContainer></Chart>;
+}
+
+function HourlyTooltip({ active, payload, campus = '全部院區' }: { active?: boolean; payload?: { payload?: HourlyRow }[]; campus?: Campus | '全部院區' }) {
+  const item = payload?.[0]?.payload;
+  if (!active || !item) return null;
+  return <div className="chart-tooltip"><strong>{item.name}　{campus === '全部院區' ? '合計' : campus} {number(campus === '全部院區' ? item.total : item[campus as typeof CAMPUSES[number]])}</strong>{CAMPUSES.filter(name => campus === '全部院區' || name === campus).map(name => <span key={name} style={{ color: COLORS[CAMPUSES.indexOf(name)] }}>{name}　{number(item[name])}</span>)}</div>;
+}
+
+function HourlyDistribution({ values, campus, empty }: { values: HourlyRow[]; campus: Campus | '全部院區'; empty: boolean }) {
+  const campuses = CAMPUSES.filter(name => campus === '全部院區' || campus === name);
+  const sharedMax = Math.max(1, ...values.map(item => Math.max(...CAMPUSES.map(name => item[name]))));
+  return <><Chart empty={empty}><ResponsiveContainer width="100%" height="100%"><BarChart data={values} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" interval={2} tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} domain={[0, 'auto']} tick={{ fontSize: 11 }} /><Tooltip content={<HourlyTooltip campus={campus} />} /><Legend />{campuses.map(name => <Bar key={name} dataKey={name} stackId="hour" fill={COLORS[CAMPUSES.indexOf(name)]} />)}</BarChart></ResponsiveContainer></Chart>
+    {campus === '全部院區' && !empty && <div className="campus-hourly">{CAMPUSES.map(name => <div key={name} className="campus-hour"><h3>{name} · {number(values.reduce((sum, item) => sum + item[name], 0))} 次</h3><div className="campus-hour-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={values} margin={{ top: 6, right: 5, left: -26, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" interval={5} tick={{ fontSize: 10 }} /><YAxis domain={[0, sharedMax]} allowDecimals={false} tick={{ fontSize: 10 }} /><Tooltip content={<HourlyTooltip campus={name} />} /><Bar dataKey={name} fill={COLORS[CAMPUSES.indexOf(name)]} /></BarChart></ResponsiveContainer></div></div>)}</div>}
+  </>;
 }
 
 function ExecutionTrend({ values, campus, empty }: { values: Record<string, string | number>[]; campus: Campus | '全部院區'; empty: boolean }) {
@@ -103,6 +123,7 @@ export default function App() {
   const [issueFilter, setIssueFilter] = useState('all');
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [selectedExecutorKey, setSelectedExecutorKey] = useState<string | null>(null);
+  const [showAllDoctors, setShowAllDoctors] = useState(false);
   const [executorPage, setExecutorPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -254,17 +275,17 @@ export default function App() {
     return [...groups.values()].sort((a, b) => String(a.key).localeCompare(String(b.key)));
   }, [events, month]);
 
-  const hourly = useMemo(() => Array.from({ length: 24 }, (_, hour) => ({
-    name: `${String(hour).padStart(2, '0')}:00`,
-    次數: events.filter(event => event.time.getHours() === hour).length,
-  })), [events]);
+  const hourly = useMemo(() => hourlyByCampus(events), [events]);
   const byWeekday = useMemo(() => ['日', '一', '二', '三', '四', '五', '六'].map((day, index) => ({
     name: `週${day}`, 次數: events.filter(event => event.time.getDay() === index).length,
   })), [events]);
 
   const monthlyCampus = useMemo(() => data ? (month === 'all' ? data.months : [month]).flatMap(key => performance(data, key, includedCodes)
     .filter(row => campus === '全部院區' || row.campus === campus).map(row => ({ month: key, ...row }))) : [], [data, month, campus, includedCodes]);
-  const bySource = useMemo(() => ['門診', '住院', '急診'].map(name => ({ name, value: newCases.filter(course => course.source === name).length })).filter(item => item.value > 0), [newCases]);
+  const bySource = useMemo(() => ['門診', '住院', '急診'].map(name => {
+    const value = newCases.filter(course => course.source === name).length;
+    return { name, value, label: `${number(value)} · ${percentage(newCases.length ? value / newCases.length : null)}` };
+  }).filter(item => item.value > 0), [newCases]);
   const branchStatus = useMemo(() => CAMPUSES.map(name => {
     const branchCases = cases.filter(course => course.campus === name);
     return {
@@ -278,10 +299,18 @@ export default function App() {
     };
   }), [cases, data]);
   const topDrugs = useMemo(() => {
-    const groups = new Map<string, number>();
-    events.forEach(event => groups.set(event.drugName, (groups.get(event.drugName) || 0) + 1));
-    return [...groups].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, value]) => ({ name: name.replace(/\s+\d.*$/, ''), value }));
+    const groups = new Map<string, { name: string; value: number }>();
+    events.forEach(event => {
+      const current = groups.get(event.drugCode) || { name: event.drugName, value: 0 };
+      current.value += 1;
+      groups.set(event.drugCode, current);
+    });
+    return [...groups.values()].sort((a, b) => b.value - a.value).slice(0, 8).map(({ name, value }) => ({
+      name: name.replace(/\s+\d.*$/, ''), value,
+      label: `${number(value)} · ${percentage(events.length ? value / events.length : null)}`,
+    }));
   }, [events]);
+  const prescribing = useMemo(() => data ? prescribingMatrix(data, includedCodes, month, campus) : { drugs: [], doctors: [] }, [data, includedCodes, month, campus]);
   const byFrequency = useMemo(() => {
     const groups = new Map<string, number>();
     events.forEach(event => groups.set(event.frequency || '未填', (groups.get(event.frequency || '未填') || 0) + 1));
@@ -368,7 +397,7 @@ export default function App() {
               {(completionSummary?.interruptedCourses || completionSummary?.unknownCourses) ? <p className="method-note">另有中斷／轉診 {number(completionSummary?.interruptedCourses || 0)} 療程、排程資料不足 {number(completionSummary?.unknownCourses || 0)} 療程，未列入到期療程完成率。</p> : null}
             </Section>
             <div className="two-column wide-left">
-              <Section title={month === 'all' ? '每月預定與實際施打' : '每日預定與實際施打'} detail="單柱呈現預定內完成、未完成及額外施打；截至資料快照前一天"><ComparisonChart values={comparison} /></Section>
+              <Section title={month === 'all' ? '每月預定與實際施打' : '每日預定與實際施打'} detail="單柱呈現預定內完成、未完成及未對應排程；截至資料快照前一天"><ComparisonChart values={comparison} /><p className="method-note">未對應排程：有施打明細，但同療程、同藥品、同日期找不到可評估的預定施打；不代表一定多打。</p></Section>
               <Section title="療程來源完成率" detail="依最後預定日期歸月；不含中斷、轉診與資料不足"><div className="table-scroll"><table><thead><tr><th>來源</th><th className="numeric">到期</th><th className="numeric">完成</th><th className="numeric">未完成</th><th>完成率</th></tr></thead><tbody>{completionBySource.map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.due)}</td><td className="numeric">{number(row.completed)}</td><td className="numeric">{number(row.due - row.completed)}</td><td><div className="rate-cell"><strong>{percentage(row.due ? row.completed / row.due : null)}</strong><meter min="0" max="1" value={row.due ? row.completed / row.due : 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div></Section>
             </div>
             {campus === '全部院區' && <Section title="各院區預定與實際施打" detail="三院區各自呈現，預定與實際可直接比較"><div className="campus-comparisons">{campusComparison.map(item => <div key={item.name} className="campus-comparison"><h3>{item.name}</h3><ComparisonChart values={item.values} /></div>)}</div></Section>}
@@ -381,8 +410,8 @@ export default function App() {
               </Section>
             </div>
             <div className="two-column">
-              <Section title="療程來源" detail="D1 與 D2-D7 已合併為同一門診療程"><Chart empty={!bySource.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={bySource} layout="vertical" margin={{ top: 16, right: 20, left: 4, bottom: 8 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={75} /><Tooltip /><Bar dataKey="value" name="療程數" fill={COLORS[1]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section>
-              <Section title="常用注射抗生素" detail="依實際施打次數排序"><Chart empty={!topDrugs.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={topDrugs} layout="vertical" margin={{ top: 0, right: 15, left: 8, bottom: 0 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="value" name="執行次數" fill={COLORS[0]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section>
+              <Section title="療程來源" detail="標示新開療程數及占比；D1 與 D2-D7 合併"><RankedBars values={bySource} color={COLORS[1]} axisWidth={75} /></Section>
+              <Section title="常用注射抗生素" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} color={COLORS[0]} axisWidth={110} /></Section>
             </div>
             <Section title="院區療程狀況" detail={`以 ${formatDate(data.snapshotDate)} 資料快照判定；失敗與轉診另外列示`}><div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">療程</th><th className="numeric">有執行</th><th className="numeric">未執行</th><th className="numeric">待施行</th><th className="numeric">失敗標記</th><th className="numeric">轉急診/住院</th></tr></thead><tbody>{branchStatus.map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{row.courses}</td><td className="numeric">{row.executed}</td><td className="numeric">{row.missed}</td><td className="numeric">{row.pending}</td><td className="numeric">{row.failed}</td><td className="numeric">{row.transferred}</td></tr>)}</tbody></table></div></Section>
             <div className="insight-row"><div><strong>{number(cases.filter(course => course.failed).length)}</strong><span>標記失敗個案</span></div><div><strong>{number(cases.filter(course => course.transferred).length)}</strong><span>轉急診 / 住院</span></div><div><strong>{number(cases.filter(course => course.accounts.length > 1).length)}</strong><span>合併的 D1 / D2 療程</span></div><div><strong>{number(selectedIssues.length)}</strong><span>待檢核項目</span></div><button onClick={() => switchView('audit')}>查看資料檢核 →</button></div>
@@ -396,10 +425,15 @@ export default function App() {
             </div>
             <div className="two-column wide-left trend-row">
               <Section title={month === 'all' ? '每月施打次數' : '每日施打次數'}><ExecutionTrend values={trend} campus={campus} empty={!events.length} /></Section>
-              <Section title="施打時段" detail="實際時間，以整點分組"><Chart empty={!events.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={hourly} margin={{ top: 10, right: 8, left: -24, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" interval={3} tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="次數" fill={COLORS[1]} radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></Chart></Section>
+              <Section title="施打時段" detail="實際時間，以整點分組；三院區堆疊並使用相同刻度各自比較"><HourlyDistribution values={hourly} campus={campus} empty={!events.length} /></Section>
             </div>
-            <div className="two-column"><Section title="藥品施打排行"><Chart empty={!topDrugs.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={topDrugs} layout="vertical" margin={{ top: 0, right: 15, left: 8, bottom: 0 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="value" name="次數" fill={COLORS[0]} /></BarChart></ResponsiveContainer></Chart></Section><Section title="醫令頻率"><Chart empty={!byFrequency.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={byFrequency} layout="vertical" margin={{ top: 16, right: 18, left: 0, bottom: 8 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={68} /><Tooltip /><Bar dataKey="value" name="施打次數" fill={COLORS[2]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section></div>
+            <div className="two-column"><Section title="藥品施打排行" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} color={COLORS[0]} axisWidth={110} /></Section><Section title="醫令頻率"><Chart empty={!byFrequency.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={byFrequency} layout="vertical" margin={{ top: 16, right: 18, left: 0, bottom: 8 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={68} /><Tooltip /><Bar dataKey="value" name="施打次數" fill={COLORS[2]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section></div>
             <div className="two-column"><Section title="星期分布" detail="實際施打時間"><Chart empty={!events.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={byWeekday} margin={{ top: 12, right: 10, left: -22, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="次數" fill={COLORS[4]} radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></Chart></Section><Section title="各藥品預定施打完成" detail="排程日與實際施打時間比對"><div className="table-scroll"><table><thead><tr><th>藥品</th><th className="numeric">預定</th><th className="numeric">完成</th><th className="numeric">未完成</th><th>完成率</th></tr></thead><tbody>{completionByDrug.slice(0, 12).map(drug => <tr key={drug.code}><td title={drug.name}>{drug.name}</td><td className="numeric">{number(drug.expected)}</td><td className="numeric">{number(drug.executed)}</td><td className="numeric">{number(drug.expected - drug.executed)}</td><td className="emph">{percentage(drug.expected ? drug.executed / drug.expected : null)}</td></tr>)}</tbody></table></div></Section></div>
+            <Section title="醫師抗生素開立偏好" detail="依療程開案月份；各格為開立此藥的療程數，占該醫師 OPAT 療程數的比例"
+              action={prescribing.doctors.length > 15 ? <button className="button ghost" onClick={() => setShowAllDoctors(value => !value)}>{showAllDoctors ? '顯示前 15 位' : `顯示全部 ${number(prescribing.doctors.length)} 位`}</button> : undefined}>
+              {prescribing.doctors.length && prescribing.drugs.length ? <div className="table-scroll prescribing-scroll"><table className="prescribing-table"><thead><tr><th className="doctor-column">醫師</th><th>院區</th><th className="numeric">OPAT 療程</th>{prescribing.drugs.map(drug => <th key={drug.code} title={drug.name}><span>{drug.name.replace(/\s+\d.*$/, '')}</span><small>{drug.code}</small></th>)}</tr></thead><tbody>{prescribing.doctors.slice(0, showAllDoctors ? undefined : 15).map(doctor => <tr key={doctor.key}><td className="doctor-column"><strong>{doctor.doctor}</strong><small>{doctor.department || '科別未填'}</small></td><td>{doctor.campus}</td><td className="numeric emph">{number(doctor.courses)}</td>{prescribing.drugs.map(drug => { const entry = doctor.byDrug[drug.code]; return <td key={drug.code} className="heat-td">{entry ? <span className="heat-cell" style={{ backgroundColor: `rgba(8, 124, 114, ${0.08 + entry.rate * 0.44})` }} title={`${doctor.doctor}：${drug.name}，${entry.courses} / ${doctor.courses} 療程`}><strong>{percentage(entry.rate)}</strong><small>{entry.courses} / {doctor.courses}</small></span> : <span className="heat-empty">—</span>}</td>; })}</tr>)}</tbody></table></div> : <div className="chart-empty heat-empty-state">此範圍沒有可分析的醫師與注射抗生素開立資料</div>}
+              <p className="method-note">每個療程對每種藥只計一次；同一療程可能開立多種抗生素，因此各藥比例不一定合計 100%。</p>
+            </Section>
             <Section title="科別與醫師" detail="依施打次數排序"><div className="table-scroll"><table><thead><tr><th>科別</th><th>醫師</th><th className="numeric">療程數</th><th className="numeric">施打次數</th></tr></thead><tbody>{doctorStats.map((item, index) => <tr key={index}><td>{item.department}</td><td>{item.doctor}</td><td className="numeric">{number(item.cases.size)}</td><td className="numeric emph">{number(item.executions)}</td></tr>)}</tbody></table></div></Section>
             <Section title="施打紀錄" detail={`共 ${number(filteredEvents.length)} 次`} action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} placeholder="帳號、病歷號、藥品、醫師、人員" /></div>}><div className="table-scroll"><table><thead><tr><th>執行時間</th><th>績效月</th><th>院區</th><th>執行人員</th><th>人員代碼</th><th>帳號</th><th>病歷號</th><th>注射抗生素</th><th>頻率</th><th>來源列</th></tr></thead><tbody>{filteredEvents.slice((page - 1) * pageSize, page * pageSize).map(event => <tr key={event.id}><td className="nowrap">{formatDate(event.time, true)}</td><td>{event.month}</td><td>{event.campus}</td><td>{event.executorName || '未記錄'}</td><td className="mono">{event.executorId || '—'}</td><td className="mono">{event.account}</td><td className="mono">{event.chartNo}</td><td>{event.drugName}</td><td>{event.frequency}</td><td className="mono">{event.rowId}</td></tr>)}</tbody></table></div><Pagination page={page} total={filteredEvents.length} size={pageSize} onChange={setPage} /></Section>
           </>}

@@ -29,7 +29,7 @@ export interface DailyComparison {
   實際: number;
   完成: number;
   未完成: number;
-  額外施打: number;
+  未對應排程: number;
 }
 
 export interface CompletionReport {
@@ -130,7 +130,7 @@ export function dailyComparison(analysis: Analysis, report: CompletionReport, in
     const found = days.get(date);
     if (found) return found;
     const item = { key: date, name: `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`,
-      預定: 0, 實際: 0, 完成: 0, 未完成: 0, 額外施打: 0 };
+      預定: 0, 實際: 0, 完成: 0, 未完成: 0, 未對應排程: 0 };
     days.set(date, item);
     return item;
   };
@@ -141,18 +141,18 @@ export function dailyComparison(analysis: Analysis, report: CompletionReport, in
     .forEach(event => { dayFor(event.date).實際 += 1; });
   const compared = [...days.values()].sort((a, b) => a.key.localeCompare(b.key)).map(item => ({
     ...item, 未完成: Math.max(0, item.預定 - item.完成),
-    額外施打: Math.max(0, item.實際 - item.完成),
+    未對應排程: Math.max(0, item.實際 - item.完成),
   }));
   if (month !== 'all') return compared;
   const months = new Map<string, DailyComparison>();
   compared.forEach(day => {
     const key = day.key.slice(0, 7);
-    const item = months.get(key) || { key, name: key, 預定: 0, 實際: 0, 完成: 0, 未完成: 0, 額外施打: 0 };
+    const item = months.get(key) || { key, name: key, 預定: 0, 實際: 0, 完成: 0, 未完成: 0, 未對應排程: 0 };
     item.預定 += day.預定;
     item.實際 += day.實際;
     item.完成 += day.完成;
     item.未完成 += day.未完成;
-    item.額外施打 += day.額外施打;
+    item.未對應排程 += day.未對應排程;
     months.set(key, item);
   });
   return [...months.values()];
