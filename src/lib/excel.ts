@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { Analysis, Campus, PerformanceRow, SourceFile } from './opat';
-import { formatDate, reportingMonth } from './opat';
+import { formatDate, isSelectedAntibiotic, reportingMonth } from './opat';
 import { groupExecutors } from './staff';
 import { hourlyByCampus, prescribingMatrix } from './analytics';
 import { summarizeCompletion } from './completion';
@@ -47,7 +47,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     醫事點數: row.medicalAffairsPoints,
     總點數: row.totalPoints,
   }));
-  const selectedEvents = analysis.executions.filter(event => includedCodes.has(event.drugCode) && (month === 'all' || event.month === month) && (campus === '全部院區' || event.campus === campus));
+  const selectedEvents = analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && (month === 'all' || event.month === month) && (campus === '全部院區' || event.campus === campus));
   const executions = selectedEvents.map(event => ({
     院區: event.campus, 帳號: event.account, 病歷號: event.chartNo, 執行人員代碼: event.executorId, 執行人員: event.executorName,
     執行時間: formatDate(event.time, true), 績效月份: event.month,
@@ -56,7 +56,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     來源檔案: recordById.get(event.rowId)?.file || '',
     來源列號: recordById.get(event.rowId)?.rowNumber || '',
   }));
-  const legacyCleaned = analysis.records.filter(row => !row.duplicateOf && includedCodes.has(row.drugCode) && (row.kind === 'injectable-antibiotic' || row.kind === 'review') &&
+  const legacyCleaned = analysis.records.filter(row => !row.duplicateOf && isSelectedAntibiotic(row.drugCode, row.kind, includedCodes) &&
     (campus === '全部院區' || row.campus === campus) && (month === 'all' || row.times.some(time => reportingMonth(time) === month) ||
       (row.startDate && formatDate(row.startDate).slice(0, 7) <= month && formatDate(row.endDate || row.startDate).slice(0, 7) >= month)))
     .map(row => ({ ...row.raw, 院區: row.campus }));

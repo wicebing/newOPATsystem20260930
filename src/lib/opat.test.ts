@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyze, courseStatus, formatDate, performance, reportingMonth, snapshotDateFromFilename } from './opat';
+import { analyze, classifyDrug, courseStatus, formatDate, performance, reportingMonth, snapshotDateFromFilename } from './opat';
 import type { RawRow } from './opat';
 
 function row(values: Partial<RawRow> = {}): RawRow {
@@ -47,6 +47,36 @@ describe('OPAT calculation', () => {
     expect(performance(data, '2026-06', included).find(item => item.campus === '竹東')).toMatchObject({ nursing: 1, pharmacy: 1 });
     expect(performance(data, '2026-07', included).find(item => item.campus === '竹東')).toMatchObject({ nursing: 1, pharmacy: 1 });
     expect(performance(data, 'all', included).find(item => item.campus === '竹東')).toMatchObject({ nursing: 2, pharmacy: 2 });
+    expect(data.executions).toHaveLength(2);
+    expect(performance(data, 'all', new Set(['SIN1AB20', 'SAL1FAD0', 'CRA4AK37'])).find(item => item.campus === '竹東'))
+      .toMatchObject({ rawNursing: 2, nursing: 2, pharmacy: 2 });
+  });
+
+  it('classifies diluents and non-antibiotic supplies before counting medication', () => {
+    expect(classifyDrug('SAL1FAD0', '100 Saline inj 0.9% 100 mL /bag')).toBe('diluent');
+    expect(classifyDrug('NEW1AA01', 'Normal Saline 0.9%')).toBe('diluent');
+    expect(classifyDrug('NEW1AA01', 'Sodium Chloride 0.9%')).toBe('diluent');
+    expect(classifyDrug('NEW1AA01', 'Sterile Water for Injection')).toBe('diluent');
+    expect(classifyDrug('NEW1AA01', '5% Dextrose inj 100 mL')).toBe('diluent');
+    expect(classifyDrug('NEW1AA01', 'New antibiotic in 5% Dextrose inj')).toBe('review');
+    expect(classifyDrug('INS9LB92', 'Insulin Pen Needle 32G /set')).toBe('other');
+    expect(classifyDrug('TOU1LBA1', '警 Toujeo SoloStar 450 U/1.5 mL /pen')).toBe('other');
+    expect(classifyDrug('NEW1AA01', 'New injectable product')).toBe('review');
+    expect(classifyDrug('NEW1AA01', 'Infusion set')).toBe('other');
+    expect(classifyDrug('NEW1AA01', 'Unspecified product')).toBe('other');
+    expect(classifyDrug('SIN1AB20', 'Sintrix in Saline')).toBe('injectable-antibiotic');
+  });
+
+  it('keeps account-level management-fee evidence on a saline row without counting saline use', () => {
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ 診療行為: '門診轉OPAT「D2-D7」' }),
+      row({ 診療行為: '門診轉OPAT「D2-D7」', 藥品八碼: 'SAL1FAD0',
+        組合商品名: '100 Saline inj 0.9% 100 mL /bag', '39029C管理費數量': 1 }),
+    ] }]);
+    expect(data.feeClaims).toHaveLength(1);
+    expect(data.records.find(record => record.id === data.feeClaims[0].rowId)?.kind).toBe('diluent');
+    expect(performance(data, '2026-07', new Set(['SIN1AB20', 'SAL1FAD0'])).find(item => item.campus === '竹東'))
+      .toMatchObject({ nursing: 1, pharmacy: 1, medicalAffairs: 1 });
   });
 
   it('caps QD at one and Q12H at two executions per calendar day', () => {

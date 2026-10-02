@@ -1,4 +1,4 @@
-import { formatDate } from './opat';
+import { formatDate, isSelectedAntibiotic } from './opat';
 import type { Analysis, Campus, Course, RecordRow } from './opat';
 
 export interface ScheduledDay {
@@ -60,7 +60,7 @@ function dailyExpected(frequency: string): number | null {
 }
 
 function isScheduled(row: RecordRow, includedCodes: Set<string>): boolean {
-  return includedCodes.has(row.drugCode) && (row.kind === 'injectable-antibiotic' || row.kind === 'review');
+  return isSelectedAntibiotic(row.drugCode, row.kind, includedCodes);
 }
 
 function dayKey(courseId: string, drugCode: string, date: string): string {
@@ -94,7 +94,7 @@ export function buildCompletion(analysis: Analysis, includedCodes: Set<string>, 
   });
 
   const actual = new Map<string, number>();
-  analysis.executions.filter(event => includedCodes.has(event.drugCode) && (event.kind === 'injectable-antibiotic' || event.kind === 'review'))
+  analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes))
     .forEach(event => {
       const key = dayKey(event.courseId, event.drugCode, event.date);
       actual.set(key, (actual.get(key) || 0) + 1);
@@ -136,7 +136,7 @@ export function dailyComparison(analysis: Analysis, report: CompletionReport, in
   };
   report.days.filter(day => (month === 'all' || day.date.startsWith(month)) && (campus === '全部院區' || day.campus === campus))
     .forEach(day => { dayFor(day.date).預定 += day.expected; dayFor(day.date).完成 += day.executed; });
-  analysis.executions.filter(event => includedCodes.has(event.drugCode) && event.date <= report.asOf &&
+  analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && event.date <= report.asOf &&
     (month === 'all' || event.date.startsWith(month)) && (campus === '全部院區' || event.campus === campus))
     .forEach(event => { dayFor(event.date).實際 += 1; });
   const compared = [...days.values()].sort((a, b) => a.key.localeCompare(b.key)).map(item => ({

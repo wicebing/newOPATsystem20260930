@@ -11,7 +11,7 @@ import {
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
-  analyze, CAMPUSES, courseStatus, formatDate, performance, POINTS, reportingMonth,
+  analyze, CAMPUSES, courseStatus, formatDate, isSelectedAntibiotic, performance, POINTS, reportingMonth,
 } from './lib/opat';
 import type { Analysis, Campus, DataIssue } from './lib/opat';
 import { buildCompletion, dailyComparison, summarizeCompletion } from './lib/completion';
@@ -207,7 +207,7 @@ export default function App() {
   }), { nursing: 0, pharmacy: 0, medicalAffairs: 0, totalPoints: 0 });
 
   const events = useMemo(() => data?.executions.filter(event =>
-    includedCodes.has(event.drugCode) && (month === 'all' || event.month === month) && (campus === '全部院區' || event.campus === campus),
+    isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && (month === 'all' || event.month === month) && (campus === '全部院區' || event.campus === campus),
   ) || [], [data, month, campus, includedCodes]);
   const completion = useMemo(() => data ? buildCompletion(data, includedCodes, data.snapshotDate) : null, [data, includedCodes]);
   const completionSummary = useMemo(() => completion ? summarizeCompletion(completion, month, campus) : null, [completion, month, campus]);
@@ -238,7 +238,7 @@ export default function App() {
   const eventCourseIds = useMemo(() => new Set(events.map(event => event.courseId)), [events]);
   const courseExecCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    data?.executions.filter(event => includedCodes.has(event.drugCode)).forEach(event => counts.set(event.courseId, (counts.get(event.courseId) || 0) + 1));
+    data?.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes)).forEach(event => counts.set(event.courseId, (counts.get(event.courseId) || 0) + 1));
     return counts;
   }, [data, includedCodes]);
   const cases = useMemo(() => data?.courses.filter(course =>
@@ -251,7 +251,7 @@ export default function App() {
   const selectedCase = cases.find(course => course.id === selectedCourseId) || null;
   const selectedCaseProgress = selectedCase ? progressByCourse.get(selectedCase.id) : null;
   const caseRows = data?.records.filter(row => row.courseId === selectedCourseId) || [];
-  const caseEvents = data?.executions.filter(event => event.courseId === selectedCourseId && includedCodes.has(event.drugCode)) || [];
+  const caseEvents = data?.executions.filter(event => event.courseId === selectedCourseId && isSelectedAntibiotic(event.drugCode, event.kind, includedCodes)) || [];
   const selectedIssues = data?.issues.filter(issue =>
     (campus === '全部院區' || issue.campus === campus) &&
     (issueFilter === 'all' || issue.code === issueFilter) &&
@@ -348,10 +348,14 @@ export default function App() {
   const filteredCases = useMemo(() => cases.filter(course => !search || [course.chartNo, course.accounts.join(' '), course.doctor, course.diagnosis].some(field => field.toLowerCase().includes(search.toLowerCase()))).slice().sort((a, b) => (b.openingDate?.getTime() || 0) - (a.openingDate?.getTime() || 0)), [cases, search]);
   const pageSize = 30;
   const issueCodes = data ? [...new Set(data.issues.map(issue => issue.code))].sort() : [];
+  const selectableDrugs = data?.drugCatalog.filter(drug => drug.kind === 'injectable-antibiotic' || drug.kind === 'review') || [];
+  const excludedProductRows = data?.drugCatalog.filter(drug => drug.kind === 'diluent' || drug.kind === 'other')
+    .reduce((sum, drug) => sum + drug.rows, 0) || 0;
 
   const choose = () => fileInput.current?.click();
   const switchView = (next: View) => { setView(next); setSearch(''); setPage(1); setDuplicatePage(1); };
   const toggleDrug = (code: string) => setIncludedCodes(previous => {
+    if (!selectableDrugs.some(drug => drug.code === code)) return previous;
     const next = new Set(previous);
     if (next.has(code)) next.delete(code);
     else next.add(code);
@@ -474,7 +478,7 @@ export default function App() {
 
           {view === 'audit' && <>
             <div className="stats-grid">{statLine('待檢核項目', number(selectedIssues.length), '#e57443', AlertTriangle)}{statLine('已排除重複醫令', number(duplicateRows.filter(row => row.duplicateOf).length), '#8b65a3', Filter)}{statLine('相似醫令待核對', number(duplicateRows.filter(row => row.possibleDuplicateOf).length), '#d6a637', AlertTriangle)}{statLine('退量與執行並存', number(selectedIssues.filter(issue => issue.code === 'refund-execution').length), '#087c72', Check)}</div>
-            <Section title="藥品分類" detail="預設只納入已確認的注射抗生素；新藥品可在此勾選納入護理與藥劑計算"><div className="drug-list">{data.drugCatalog.map(drug => <label className="drug-item" key={drug.code || drug.name}><input type="checkbox" checked={includedCodes.has(drug.code)} onChange={() => toggleDrug(drug.code)} /><span className="drug-check"><Check size={13} /></span><span className="drug-main"><strong>{drug.name}</strong><small>{drug.code || '無藥品碼'} · {number(drug.rows)} 列</small></span><span className={`kind kind-${drug.kind}`}>{drug.kind === 'injectable-antibiotic' ? '注射抗生素' : drug.kind === 'diluent' ? '稀釋液' : drug.kind === 'review' ? '待確認' : '其他藥品'}</span></label>)}</div></Section>
+            <Section title="藥品分類" detail={`僅列出注射抗生素與待確認注射品項；稀釋液及非 OPAT 抗生素已排除 ${number(excludedProductRows)} 原始列`}><div className="drug-list">{selectableDrugs.map(drug => <label className="drug-item" key={drug.code || drug.name}><input type="checkbox" checked={includedCodes.has(drug.code)} onChange={() => toggleDrug(drug.code)} /><span className="drug-check"><Check size={13} /></span><span className="drug-main"><strong>{drug.name}</strong><small>{drug.code || '無藥品碼'} · {number(drug.rows)} 列</small></span><span className={`kind kind-${drug.kind}`}>{drug.kind === 'injectable-antibiotic' ? '注射抗生素' : '待確認'}</span></label>)}</div></Section>
             <Section title="重複醫令核對" detail={`共 ${number(duplicateRows.length)} 列；已排除者不重複計入護理、藥劑及排程`}><div className="table-scroll"><table><thead><tr><th>判定</th><th>院區</th><th>帳號</th><th>執行人員明細</th><th>藥品</th><th>開始日</th><th>結束日</th><th>執行次數明細</th><th>對照執行明細</th><th>來源列</th><th>對照列</th></tr></thead><tbody>{duplicateRows.slice((duplicatePage - 1) * pageSize, duplicatePage * pageSize).map(row => { const counterpart = recordById.get(row.duplicateOf || row.possibleDuplicateOf || ''); return <tr key={row.id}><td><span className={`status ${row.duplicateOf ? 'neutral' : 'danger'}`}>{row.duplicateOf ? '已排除' : '待核對'}</span></td><td>{row.campus}</td><td className="mono">{row.account}</td><td>{row.executorDetail || '—'}</td><td>{row.drugName}</td><td className="nowrap">{formatDate(row.startDate)}</td><td className="nowrap">{formatDate(row.endDate)}</td><td className="nowrap">{row.detail || '—'}</td><td className="nowrap">{counterpart?.detail || '—'}</td><td className="mono nowrap">{row.file} #{row.rowNumber}</td><td className="mono nowrap">{counterpart?.file} #{counterpart?.rowNumber}</td></tr>; })}</tbody></table></div><Pagination page={duplicatePage} total={duplicateRows.length} size={pageSize} onChange={setDuplicatePage} /></Section>
             <Section title="異常與核對" detail={`共 ${number(selectedIssues.length)} 項；來源列可與原始 Excel 比對`} action={<label className="issue-select"><select value={issueFilter} onChange={event => { setIssueFilter(event.target.value); setPage(1); }}><option value="all">全部類型</option>{issueCodes.map(code => <option key={code}>{code}</option>)}</select><ChevronDown size={15} /></label>}><div className="table-scroll"><table><thead><tr><th>類型</th><th>院區</th><th>帳號</th><th>說明</th><th>來源列</th></tr></thead><tbody>{selectedIssues.slice((page - 1) * pageSize, page * pageSize).map((issue: DataIssue, index) => <tr key={`${issue.rowId}-${issue.code}-${index}`}><td><span className={`status ${issue.level === 'warning' ? 'neutral' : 'danger'}`}>{issue.code}</span></td><td>{issue.campus}</td><td className="mono">{issue.account}</td><td>{issue.message}</td><td className="mono">{data.records.find(row => row.id === issue.rowId)?.file}　#{data.records.find(row => row.id === issue.rowId)?.rowNumber}</td></tr>)}</tbody></table></div><Pagination page={page} total={selectedIssues.length} size={pageSize} onChange={setPage} /></Section>
           </>}

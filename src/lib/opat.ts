@@ -194,10 +194,14 @@ export function reportingMonth(date: Date): string {
 export function classifyDrug(code: string, name: string): DrugKind {
   const normalizedCode = code.toUpperCase().replace(/\s+/g, '');
   const normalizedName = name.toLowerCase();
-  if (normalizedCode.startsWith('SAL') || /saline|sodium chloride|稀釋液|diluent/.test(normalizedName)) return 'diluent';
   if (ANTIBIOTIC_CODES.has(normalizedCode)) return 'injectable-antibiotic';
-  if (/\b(tab|tablet|cap|capsule|oral|cream|oint|supp|pack)\b|口服|軟膏/.test(normalizedName) || /^[A-Z ]{2,4}[245789]/.test(normalizedCode)) return 'other';
-  return 'review';
+  if (normalizedCode.startsWith('SAL') || /saline|sodium chloride|\bnacl\b|\bd5w\b|^(?:\d+(?:\.\d+)?%?\s*)?dextrose\b|sterile water|water for injection|稀釋液|稀釋用|注射用水|氯化鈉|葡萄糖液|diluent/.test(normalizedName)) return 'diluent';
+  if (/\b(tab|tablet|cap|capsule|oral|cream|oint|supp|pack|insulin|toujeo|solostar|needle|syringe|set)\b|口服|軟膏|針具|針筒|注射器/.test(normalizedName) || /^[A-Z ]{2,4}[245789]/.test(normalizedCode)) return 'other';
+  return /\b(inj|injection|injectable|vial|amp|ampoule|intravenous|iv|infusion|bag)\b|針/.test(normalizedName) ? 'review' : 'other';
+}
+
+export function isSelectedAntibiotic(code: string, kind: DrugKind, includedCodes: Set<string>): boolean {
+  return includedCodes.has(code) && (kind === 'injectable-antibiotic' || kind === 'review');
 }
 
 function campusFor(row: RawRow, file: string): Campus {
@@ -405,7 +409,7 @@ export function analyze(files: SourceFile[]): Analysis {
   records.forEach(row => { row.courseId = find(`${row.campus}|${row.account}`); });
 
   const executionMap = new Map<string, Execution>();
-  records.filter(row => !row.duplicateOf).forEach(row => row.times.forEach((time, index) => {
+  records.filter(row => !row.duplicateOf && (row.kind === 'injectable-antibiotic' || row.kind === 'review')).forEach(row => row.times.forEach((time, index) => {
     const key = `${row.courseId}|${row.drugCode}|${time.getTime()}`;
     const prior = executionMap.get(key);
     if (prior) {
@@ -530,14 +534,14 @@ export interface PerformanceRow {
 }
 
 export function performance(analysis: Analysis, month: string, includedCodes: Set<string>): PerformanceRow[] {
-  const eligible = analysis.executions.filter(event => includedCodes.has(event.drugCode) && (month === 'all' || event.month === month));
+  const eligible = analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && (month === 'all' || event.month === month));
   return CAMPUSES.map(campus => {
     const events = eligible.filter(event => event.campus === campus);
-    const sourceRows = analysis.records.filter(row => !row.duplicateOf && row.campus === campus && includedCodes.has(row.drugCode) &&
+    const sourceRows = analysis.records.filter(row => !row.duplicateOf && row.campus === campus && isSelectedAntibiotic(row.drugCode, row.kind, includedCodes) &&
       row.executionCount > 0 && row.times.some(time => month === 'all' || reportingMonth(time) === month));
     const pharmacy = sourceRows.reduce((sum, row) => sum + (month === 'all'
       ? new Set(row.times.map(reportingMonth)).size : 1), 0);
-    const rawNursing = analysis.records.filter(row => row.campus === campus && includedCodes.has(row.drugCode))
+    const rawNursing = analysis.records.filter(row => row.campus === campus && isSelectedAntibiotic(row.drugCode, row.kind, includedCodes))
       .reduce((sum, row) => sum + row.times.filter(time => month === 'all' || reportingMonth(time) === month).length, 0);
     const medicalAffairs = analysis.feeClaims.filter(claim => claim.campus === campus && (month === 'all' || claim.month === month)).reduce((sum, claim) => sum + claim.count, 0);
     const nursing = events.length;

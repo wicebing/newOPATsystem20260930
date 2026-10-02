@@ -1,4 +1,4 @@
-import { CAMPUSES } from './opat';
+import { CAMPUSES, isSelectedAntibiotic } from './opat';
 import type { Analysis, Campus, Execution, KnownCampus } from './opat';
 
 export interface HourlyRow {
@@ -51,7 +51,8 @@ export function prescribingMatrix(analysis: Analysis, includedCodes: Set<string>
   const drugNames = new Map<string, string>();
 
   analysis.records.forEach(row => {
-    if (!selectedCourses.has(row.courseId) || !row.doctor) return;
+    if (!selectedCourses.has(row.courseId) || !row.doctor ||
+      !isSelectedAntibiotic(row.drugCode, row.kind, includedCodes)) return;
     const key = `${row.campus}|${row.doctor}`;
     let group = groups.get(key);
     if (!group) {
@@ -59,7 +60,6 @@ export function prescribingMatrix(analysis: Analysis, includedCodes: Set<string>
       groups.set(key, group);
     }
     group.courses.add(row.courseId);
-    if (!includedCodes.has(row.drugCode)) return;
     if (!group.drugs.has(row.drugCode)) group.drugs.set(row.drugCode, new Set());
     group.drugs.get(row.drugCode)!.add(row.courseId);
     if (!drugCourses.has(row.drugCode)) drugCourses.set(row.drugCode, new Set());

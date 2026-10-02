@@ -41,6 +41,18 @@ describe('scheduled injection completion', () => {
     expect(summarizeCompletion(report)).toMatchObject({ expected: 2, executed: 2, doseRate: 1, completedCourses: 1 });
   });
 
+  it('ignores saline schedules and administrations even when its code is selected', () => {
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({}),
+      row({ 藥品八碼: 'SAL1FAD0', 組合商品名: '100 Saline inj 0.9% 100 mL /bag' }),
+    ] }]);
+    const selected = new Set(['SIN1AB20', 'SAL1FAD0']);
+    const report = buildCompletion(data, selected, today);
+    expect(report.days).toHaveLength(2);
+    expect(summarizeCompletion(report)).toMatchObject({ expected: 2, executed: 1 });
+    expect(dailyComparison(data, report, selected, '2026-07', '竹東')[0]).toMatchObject({ 實際: 1 });
+  });
+
   it('excludes today and future dates from the overdue denominator', () => {
     const data = analyze([{ name: 'sample-g.xlsx', rows: [row({ 結束日: '20260726' })] }]);
     const report = buildCompletion(data, included, new Date(2026, 6, 24));
