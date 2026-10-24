@@ -12,6 +12,36 @@ beforeEach(() => reader.mockClear());
 afterEach(cleanup);
 
 describe('Excel import queue', () => {
+  it('shows deduplicated new courses in the overview for the selected month and campus', async () => {
+    reader.mockResolvedValueOnce([{ name: '1151002_OPAT個案資料g.xlsx', rows: [
+      { 帳號: '26T70000011', 病歷號: 'G000011', 院區: '竹東', 診療行為: '門診轉OPAT「D1」',
+        組合商品名: 'Sintrix 500 mg/vial', 藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 1,
+        執行次數明細: '2026/09/01 09:00', 確認日期: '20260901', 開始日: '20260901', 結束日: '20260901' },
+      { 帳號: '26T70000012', 病歷號: 'G000011', 院區: '竹東', 診療行為: '門診轉OPAT「D2-D7」',
+        組合商品名: 'Sintrix 500 mg/vial', 藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 1,
+        執行次數明細: '2026/09/02 09:00', 確認日期: '20260902', 開始日: '20260902', 結束日: '20260902' },
+      { 帳號: '26T70000013', 病歷號: 'G000013', 院區: '竹北', 診療行為: '急診轉OPAT',
+        組合商品名: 'Sintrix 500 mg/vial', 藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 1,
+        執行次數明細: '2026/09/03 09:00', 確認日期: '20260903', 開始日: '20260903', 結束日: '20260903' },
+      { 帳號: '26T70000014', 病歷號: 'G000014', 院區: '竹北', 診療行為: '急診轉OPAT',
+        組合商品名: 'Sintrix 500 mg/vial', 藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 1,
+        執行次數明細: '2026/08/30 09:00', 確認日期: '20260830', 開始日: '20260830', 結束日: '20260830' },
+    ] }]);
+    const { container } = render(<App />);
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement,
+      { target: { files: [new File(['g'], '1151002_OPAT個案資料g.xlsx')] } });
+    fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
+    await screen.findByText(/已載入 4 筆原始資料、3 個療程/);
+
+    fireEvent.change(screen.getByLabelText('績效月份'), { target: { value: '2026-09' } });
+    expect(screen.getByText('本期新增療程').closest('.stat')?.querySelector('strong')?.textContent).toBe('2');
+    fireEvent.change(screen.getByLabelText('院區'), { target: { value: '竹東' } });
+    expect(screen.getByText('本期新增療程').closest('.stat')?.querySelector('strong')?.textContent).toBe('1');
+    fireEvent.change(screen.getByLabelText('績效月份'), { target: { value: 'all' } });
+    fireEvent.change(screen.getByLabelText('院區'), { target: { value: '全部院區' } });
+    expect(screen.getByText('新增療程總數').closest('.stat')?.querySelector('strong')?.textContent).toBe('3');
+  });
+
   it('accumulates separate selections and analyzes only after clicking the button', async () => {
     const { container } = render(<App />);
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;

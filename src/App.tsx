@@ -424,7 +424,8 @@ export default function App() {
         {!data && !busy && <EmptyState fileCount={files.length} onChoose={choose} onAnalyze={() => void process()} onDrop={onDrop} />}
         {data && <>
           {view === 'overview' && <>
-            <div className="stats-grid">
+            <div className="stats-grid overview-stats">
+              {statLine(month === 'all' ? '新增療程總數' : '本期新增療程', number(newCases.length), COLORS[3], Users)}
               {statLine('本期計分施打', number(total.nursing), COLORS[0], Activity)}
               {statLine('施打完成率', percentage(completionSummary?.doseRate ?? null), COLORS[2], Check)}
               {statLine('未完成施打', number(completionSummary?.missed || 0), COLORS[1], AlertTriangle)}
