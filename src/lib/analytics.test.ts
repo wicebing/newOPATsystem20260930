@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyze } from './opat';
-import { hourlyByCampus, prescribingMatrix } from './analytics';
+import { hourlyByCampus, prescribingMatrix, weeklyOrders } from './analytics';
 import type { RawRow } from './opat';
 
 const base: RawRow = {
@@ -12,6 +12,27 @@ const base: RawRow = {
 const row = (values: RawRow): RawRow => ({ ...base, ...values });
 
 describe('execution and prescribing analytics', () => {
+  it('groups opened courses and prescribed injections by Monday weeks and campus', () => {
+    const data = analyze([{ name: '1150804_OPAT個案資料g.xlsx', rows: [
+      row({ 開始日: '20260801', 結束日: '20260802', 確認日期: '20260801' }),
+      row({ 帳號: '26T70000002', 病歷號: 'G000001', 診療行為: '門診轉OPAT「D2-D7」',
+        開始日: '20260802', 結束日: '20260803', 確認日期: '20260802' }),
+      row({ 帳號: '26T70000003', 病歷號: 'G000003', 院區: '竹北', 頻率: 'Q12H',
+        開始日: '20260803', 結束日: '20260804', 確認日期: '20260803' }),
+      row({ 帳號: '26T70000004', 病歷號: 'G000004', 藥品八碼: 'SAL1FAD0',
+        組合商品名: '100 Saline inj 0.9% 100 mL /bag', 開始日: '20260803', 結束日: '20260804' }),
+    ] }]);
+    const weekly = weeklyOrders(data, new Set(['SIN1AB20', 'SAL1FAD0']), '2026-08');
+    expect(weekly.courses).toEqual([
+      expect.objectContaining({ key: '2026-07-27', 竹東: 1, 竹北: 0, total: 1 }),
+      expect.objectContaining({ key: '2026-08-03', 竹東: 0, 竹北: 1, total: 1 }),
+    ]);
+    expect(weekly.doses).toEqual([
+      expect.objectContaining({ key: '2026-07-27', 竹東: 2, 竹北: 0, total: 2 }),
+      expect.objectContaining({ key: '2026-08-03', 竹東: 1, 竹北: 4, total: 5 }),
+    ]);
+  });
+
   it('separates hourly counts by campus while retaining a comparable total', () => {
     const data = analyze([{ name: '1150908_OPAT個案資料g.xlsx', rows: [
       row({}),

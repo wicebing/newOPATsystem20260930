@@ -67,8 +67,7 @@ function dayKey(courseId: string, drugCode: string, date: string): string {
   return `${courseId}|${drugCode}|${date}`;
 }
 
-export function buildCompletion(analysis: Analysis, includedCodes: Set<string>, today = new Date()): CompletionReport {
-  const asOf = formatDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
+function collectSchedule(analysis: Analysis, includedCodes: Set<string>) {
   const scheduled = new Map<string, ScheduledDay>();
   const invalidCourses = new Set<string>();
   const eligibleRows = analysis.records.filter(row => !row.duplicateOf && isScheduled(row, includedCodes));
@@ -92,6 +91,17 @@ export function buildCompletion(analysis: Analysis, includedCodes: Set<string>, 
       });
     }
   });
+
+  return { scheduled, invalidCourses, eligibleRows };
+}
+
+export function scheduledDoses(analysis: Analysis, includedCodes: Set<string>): ScheduledDay[] {
+  return [...collectSchedule(analysis, includedCodes).scheduled.values()];
+}
+
+export function buildCompletion(analysis: Analysis, includedCodes: Set<string>, today = new Date()): CompletionReport {
+  const asOf = formatDate(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
+  const { scheduled, invalidCourses, eligibleRows } = collectSchedule(analysis, includedCodes);
 
   const actual = new Map<string, number>();
   analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && event.date <= asOf)

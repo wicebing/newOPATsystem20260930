@@ -86,4 +86,21 @@ describe('Excel import queue', () => {
     expect(screen.getByText('G000002')).toBeTruthy();
     expect(screen.getByText('未完成')).toBeTruthy();
   });
+
+  it('opens an October 1 snapshot on the September performance month', async () => {
+    reader.mockResolvedValueOnce([{ name: '1151001_OPAT個案資料g.xlsx', rows: [{
+      帳號: '26T70000001', 病歷號: 'G000001', 院區: '竹東',
+      診療行為: '門診轉OPAT「D1」', 組合商品名: 'Sintrix 500 mg/vial',
+      藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 1,
+      執行次數明細: '2026/09/30 09:00', 確認日期: '20260930',
+      開始日: '20260930', 結束日: '20261001', '39029C管理費數量': 0,
+    }] }]);
+    const { container } = render(<App />);
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement,
+      { target: { files: [new File(['g'], '1151001_OPAT個案資料g.xlsx')] } });
+    fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
+    await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
+    expect((screen.getByLabelText('績效月份') as HTMLSelectElement).value).toBe('2026-09');
+    expect(screen.getByRole('heading', { name: '每週開立新療程' })).toBeTruthy();
+  });
 });

@@ -17,11 +17,11 @@ import type { Analysis, Campus, DataIssue } from './lib/opat';
 import { buildCompletion, dailyComparison, summarizeCompletion } from './lib/completion';
 import type { DailyComparison } from './lib/completion';
 import { executorKey, groupExecutors } from './lib/staff';
-import { hourlyByCampus, prescribingMatrix } from './lib/analytics';
-import type { HourlyRow } from './lib/analytics';
+import { hourlyByCampus, prescribingMatrix, weeklyOrders } from './lib/analytics';
+import type { HourlyRow, WeeklyRow } from './lib/analytics';
 
 type View = 'overview' | 'execution' | 'staff' | 'performance' | 'cases' | 'audit';
-const COLORS = ['#087c72', '#e57443', '#8b65a3', '#d6a637', '#5c92b3', '#9ba8a4'];
+const COLORS = ['#197b72', '#d47758', '#557db5', '#ae8641', '#826d9a', '#789198'];
 const NAV: { id: View; label: string; icon: LucideIcon }[] = [
   { id: 'overview', label: '總覽', icon: LayoutDashboard },
   { id: 'execution', label: '執行分析', icon: Activity },
@@ -98,6 +98,29 @@ function ExecutionTrend({ values, campus, empty }: { values: Record<string, stri
   </>;
 }
 
+function WeeklyChart({ values, campus, unit }: { values: WeeklyRow[]; campus: Campus | '全部院區'; unit: string }) {
+  const campuses = CAMPUSES.filter(name => campus === '全部院區' || name === campus);
+  const max = Math.max(1, ...values.flatMap(row => CAMPUSES.map(name => row[name])));
+  if (!values.some(row => campuses.some(name => row[name] > 0))) return <div className="chart-empty weekly-empty">此範圍沒有開立資料</div>;
+  return <>
+    <div className="weekly-scroll"><div className="weekly-primary" style={{ minWidth: Math.max(350, values.length * (campus === '全部院區' ? 94 : 76)) }}>
+      <ResponsiveContainer width="100%" height="100%"><BarChart data={values} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barCategoryGap="27%">
+        <CartesianGrid stroke="#e3e9ed" vertical={false} /><XAxis dataKey="name" interval={0} /><YAxis allowDecimals={false} width={42} /><Tooltip content={<TooltipContent />} />
+        {campus === '全部院區' && <Legend />}{campuses.map(name => <Bar key={name} dataKey={name} name={name} fill={COLORS[CAMPUSES.indexOf(name)]} maxBarSize={24} radius={[3, 3, 0, 0]} isAnimationActive={false} />)}
+      </BarChart></ResponsiveContainer>
+    </div></div>
+    {campus === '全部院區' && <div className="campus-weekly">{CAMPUSES.map(name => <div className="campus-week" key={name}>
+      <h3><span className="campus-key" style={{ background: COLORS[CAMPUSES.indexOf(name)] }} />{name}<span>{number(values.reduce((sum, row) => sum + row[name], 0))} {unit}</span></h3>
+      <div className="weekly-scroll"><div className="weekly-small-chart" style={{ minWidth: Math.max(290, values.length * 64) }}>
+        <ResponsiveContainer width="100%" height="100%"><BarChart data={values} margin={{ top: 7, right: 5, left: 0, bottom: 1 }} barCategoryGap="31%">
+          <CartesianGrid stroke="#e3e9ed" vertical={false} /><XAxis dataKey="name" interval={values.length > 8 ? 1 : 0} /><YAxis allowDecimals={false} width={34} domain={[0, max]} />
+          <Tooltip content={<TooltipContent />} /><Bar dataKey={name} name={name} fill={COLORS[CAMPUSES.indexOf(name)]} maxBarSize={22} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+        </BarChart></ResponsiveContainer>
+      </div></div>
+    </div>)}</div>}
+  </>;
+}
+
 function EmptyState({ fileCount, onChoose, onAnalyze, onDrop }: { fileCount: number; onChoose: () => void; onAnalyze: () => void; onDrop: (event: DragEvent<HTMLDivElement>) => void }) {
   return <div className="empty-state" onDragOver={event => event.preventDefault()} onDrop={onDrop}>
     <div className="empty-icon"><FileSpreadsheet size={32} strokeWidth={1.5} /></div>
@@ -139,7 +162,8 @@ export default function App() {
       const result = analyze(await readExcelFiles(files));
       setData(result);
       setIncludedCodes(new Set(result.drugCatalog.filter(drug => drug.kind === 'injectable-antibiotic').map(drug => drug.code)));
-      setMonth(result.months.at(-1) || 'all');
+      const snapshotMonth = reportingMonth(result.snapshotDate);
+      setMonth(result.months.includes(snapshotMonth) ? snapshotMonth : result.months.at(-1) || 'all');
       setIssueFilter('all');
       setDuplicatePage(1);
       setSelectedCourseId(null);
@@ -224,6 +248,8 @@ export default function App() {
     return [...groups.entries()].map(([code, result]) => ({ code, ...result })).sort((a, b) => b.expected - a.expected);
   }, [completion, month, campus]);
   const comparison = useMemo(() => data && completion ? dailyComparison(data, completion, includedCodes, month, campus) : [], [data, completion, includedCodes, month, campus]);
+  const weekly = useMemo(() => data ? weeklyOrders(data, includedCodes, month) : { courses: [], doses: [] }, [data, includedCodes, month]);
+  const weeklyCampuses = CAMPUSES.filter(name => campus === '全部院區' || name === campus);
   const campusComparison = useMemo(() => data && completion ? CAMPUSES.map(name => ({ name, values: dailyComparison(data, completion, includedCodes, month, name) })) : [], [data, completion, includedCodes, month]);
   const completionBySource = useMemo(() => {
     const courseById = new Map(data?.courses.map(course => [course.id, course]) || []);
@@ -397,17 +423,26 @@ export default function App() {
         {data && <>
           {view === 'overview' && <>
             <div className="stats-grid">
-              {statLine('本期新開療程', number(newCases.length), '#087c72', Users)}
-              {statLine('注射抗生素施打', number(total.nursing), '#e57443', Activity)}
-              {statLine('藥品保管筆數', number(total.pharmacy), '#8b65a3', Pill)}
-              {statLine('管理費申報', number(total.medicalAffairs), '#d6a637', ClipboardList)}
+              {statLine('本期新開療程', number(newCases.length), COLORS[0], Users)}
+              {statLine('注射抗生素施打', number(total.nursing), COLORS[1], Activity)}
+              {statLine('藥品保管筆數', number(total.pharmacy), COLORS[2], Pill)}
+              {statLine('管理費申報', number(total.medicalAffairs), COLORS[3], ClipboardList)}
             </div>
+            <Section title="每週開立新療程" detail="依療程最早確認／看診日歸週；門診 D1 與 D2 合併為一療程，週一至週日">
+              <WeeklyChart values={weekly.courses} campus={campus} unit="療程" />
+            </Section>
+            <Section title="每週開立施打次數" detail="依注射抗生素開始／結束日與頻率推算預定施打；包含尚未到期的醫令，不等於實際施打">
+              <WeeklyChart values={weekly.doses} campus={campus} unit="次" />
+            </Section>
+            <Section title="每週開立量明細" detail="所選月份僅計入日期落在該月的開案與預定施打，跨月週別仍以週一標示">
+              <div className="table-scroll"><table className={`weekly-table ${campus === '全部院區' ? 'all-campus' : ''}`}><thead><tr><th rowSpan={2}>週別</th><th colSpan={weeklyCampuses.length + (campus === '全部院區' ? 1 : 0)}>新療程</th><th colSpan={weeklyCampuses.length + (campus === '全部院區' ? 1 : 0)}>預定施打次數</th></tr><tr>{weeklyCampuses.map(name => <th key={`course-${name}`} className="numeric">{name}</th>)}{campus === '全部院區' && <th className="numeric">合計</th>}{weeklyCampuses.map(name => <th key={`dose-${name}`} className="numeric">{name}</th>)}{campus === '全部院區' && <th className="numeric">合計</th>}</tr></thead><tbody>{weekly.courses.map((opened, index) => { const planned = weekly.doses[index]; return <tr key={opened.key}><td className="emph">{opened.key} · {opened.name}</td>{weeklyCampuses.map(name => <td key={`course-${name}`} className="numeric">{number(opened[name])}</td>)}{campus === '全部院區' && <td className="numeric emph">{number(opened.total)}</td>}{weeklyCampuses.map(name => <td key={`dose-${name}`} className="numeric">{number(planned[name])}</td>)}{campus === '全部院區' && <td className="numeric emph">{number(planned.total)}</td>}</tr>; })}</tbody></table></div>
+            </Section>
             <Section title="執行完成率" detail={`依檔名下載日 ${formatDate(data.snapshotDate)} 判定；僅統計截至 ${completion?.asOf || '—'} 的排程，中斷或轉診及資料不足者不列入分母。`}>
               <div className="stats-grid completion-stats">
-                {statLine('預定施打', number(completionSummary?.expected || 0), '#087c72', ClipboardList)}
-                {statLine('已完成施打', number(completionSummary?.executed || 0), '#e57443', Activity)}
-                {statLine('施打完成率', percentage(completionSummary?.doseRate ?? null), '#8b65a3', Check)}
-                {statLine('到期療程完成率', percentage(completionSummary?.courseRate ?? null), '#d6a637', ShieldCheck)}
+                {statLine('預定施打', number(completionSummary?.expected || 0), COLORS[0], ClipboardList)}
+                {statLine('已完成施打', number(completionSummary?.executed || 0), COLORS[1], Activity)}
+                {statLine('施打完成率', percentage(completionSummary?.doseRate ?? null), COLORS[2], Check)}
+                {statLine('到期療程完成率', percentage(completionSummary?.courseRate ?? null), COLORS[3], ShieldCheck)}
               </div>
               <div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">預定施打</th><th className="numeric">已完成</th><th className="numeric">未完成</th><th>施打完成率</th><th className="numeric">到期療程</th><th className="numeric">完成療程</th><th>療程完成率</th></tr></thead><tbody>{completionByCampus.filter(row => campus === '全部院區' || row.name === campus).map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.expected)}</td><td className="numeric">{number(row.executed)}</td><td className="numeric">{number(row.missed)}</td><td><div className="rate-cell"><strong>{percentage(row.doseRate)}</strong><meter min="0" max="1" value={row.doseRate || 0} aria-label={`${row.name}施打完成率`} /></div></td><td className="numeric">{number(row.dueCourses)}</td><td className="numeric">{number(row.completedCourses)}</td><td><div className="rate-cell"><strong>{percentage(row.courseRate)}</strong><meter min="0" max="1" value={row.courseRate || 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div>
               {(completionSummary?.interruptedCourses || completionSummary?.unknownCourses) ? <p className="method-note">另有中斷／轉診 {number(completionSummary?.interruptedCourses || 0)} 療程、排程資料不足 {number(completionSummary?.unknownCourses || 0)} 療程，未列入到期療程完成率。</p> : null}
@@ -435,9 +470,9 @@ export default function App() {
 
           {view === 'execution' && <>
             <div className="stats-grid three">
-              {statLine('施打總次數', number(events.length), '#087c72', Activity)}
-              {statLine('有施打的療程', number(new Set(events.map(event => event.courseId)).size), '#e57443', Users)}
-              {statLine('注射藥品種類', number(new Set(events.map(event => event.drugCode)).size), '#8b65a3', Pill)}
+              {statLine('施打總次數', number(events.length), COLORS[0], Activity)}
+              {statLine('有施打的療程', number(new Set(events.map(event => event.courseId)).size), COLORS[1], Users)}
+              {statLine('注射藥品種類', number(new Set(events.map(event => event.drugCode)).size), COLORS[2], Pill)}
             </div>
             <div className="two-column wide-left trend-row">
               <Section title={month === 'all' ? '每月施打次數' : '每日施打次數'}><ExecutionTrend values={trend} campus={campus} empty={!events.length} /></Section>
@@ -456,9 +491,9 @@ export default function App() {
 
           {view === 'staff' && <>
             <div className="stats-grid three">
-              {statLine('有紀錄執行人員', number(executorStats.filter(person => person.name !== '未記錄').length), '#087c72', Users)}
-              {statLine('可追溯施打', number(events.filter(event => event.executorName).length), '#e57443', Activity)}
-              {statLine('施打病人數', number(new Set(events.map(event => `${event.campus}|${event.chartNo}`)).size), '#8b65a3', Stethoscope)}
+              {statLine('有紀錄執行人員', number(executorStats.filter(person => person.name !== '未記錄').length), COLORS[0], Users)}
+              {statLine('可追溯施打', number(events.filter(event => event.executorName).length), COLORS[1], Activity)}
+              {statLine('施打病人數', number(new Set(events.map(event => `${event.campus}|${event.chartNo}`)).size), COLORS[2], Stethoscope)}
             </div>
             <Section title="人員施打量" detail="依實際施打次數排序"><Chart empty={!executorStats.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={executorStats.slice(0, 12)} layout="vertical" margin={{ top: 2, right: 18, left: 8, bottom: 2 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="executions" name="施打次數" fill={COLORS[0]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section>
             <Section title="執行人員統計" detail={`共 ${number(filteredExecutorStats.length)} 位／組`} action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); setExecutorPage(1); }} placeholder="姓名、人員代碼、院區" /></div>}><div className="table-scroll"><table><thead><tr><th>執行人員</th><th>人員代碼</th><th>院區</th><th className="numeric">施打次數</th><th className="numeric">病人數</th><th className="numeric">療程數</th><th className="numeric">藥品種類</th><th>首次施打</th><th>最後施打</th></tr></thead><tbody>{filteredExecutorStats.slice((page - 1) * pageSize, page * pageSize).map(person => <tr key={person.key} className={selectedExecutor?.key === person.key ? 'selected-row' : ''}><td><button className="table-link" onClick={() => { setSelectedExecutorKey(person.key); setExecutorPage(1); }}>{person.name}</button></td><td className="mono">{person.id || '—'}</td><td>{person.campus}</td><td className="numeric emph">{number(person.executions)}</td><td className="numeric">{number(person.patients)}</td><td className="numeric">{number(person.courses)}</td><td className="numeric">{number(person.drugs)}</td><td className="nowrap">{formatDate(person.first, true)}</td><td className="nowrap">{formatDate(person.last, true)}</td></tr>)}</tbody></table></div><Pagination page={page} total={filteredExecutorStats.length} size={pageSize} onChange={setPage} /></Section>
@@ -467,21 +502,21 @@ export default function App() {
 
           {view === 'performance' && <>
             <div className="stats-grid three">
-              {statLine('護理點數', number(total.nursing * POINTS.nursing, 2), '#087c72', Activity)}
-              {statLine('藥劑點數', number(total.pharmacy * POINTS.pharmacy, 2), '#e57443', Pill)}
-              {statLine('醫事點數', number(total.medicalAffairs * POINTS.medicalAffairs, 2), '#8b65a3', ClipboardList)}
+              {statLine('護理點數', number(total.nursing * POINTS.nursing, 2), COLORS[0], Activity)}
+              {statLine('藥劑點數', number(total.pharmacy * POINTS.pharmacy, 2), COLORS[1], Pill)}
+              {statLine('醫事點數', number(total.medicalAffairs * POINTS.medicalAffairs, 2), COLORS[2], ClipboardList)}
             </div>
             <Section title="各職類績效" detail="施打與藥品保管按 08:00 切月；無執行時間的管理費依確認日期歸月"><div className="table-scroll"><table className="performance-table"><thead><tr><th>院區</th><th className="numeric">原始施打</th><th className="numeric">排除重複/超頻</th><th className="numeric">護理次數</th><th className="numeric">護理點數</th><th className="numeric">藥劑筆數</th><th className="numeric">藥劑點數</th><th className="numeric">管理費申報</th><th className="numeric">醫事點數</th><th className="numeric">總點數</th></tr></thead><tbody>{visibleReport.map(row => <tr key={row.campus}><td className="emph">{row.campus}</td><td className="numeric">{number(row.rawNursing)}</td><td className="numeric">{number(row.excludedNursing)}</td><td className="numeric">{number(row.nursing)}</td><td className="numeric">{number(row.nursingPoints, 2)}</td><td className="numeric">{number(row.pharmacy)}</td><td className="numeric">{number(row.pharmacyPoints, 2)}</td><td className="numeric">{number(row.medicalAffairs)}</td><td className="numeric">{number(row.medicalAffairsPoints, 3)}</td><td className="numeric emph">{number(row.totalPoints, 3)}</td></tr>)}</tbody><tfoot><tr><td>合計</td><td className="numeric">{number(visibleReport.reduce((sum, row) => sum + row.rawNursing, 0))}</td><td className="numeric">{number(visibleReport.reduce((sum, row) => sum + row.excludedNursing, 0))}</td><td className="numeric">{number(total.nursing)}</td><td className="numeric">{number(total.nursing * POINTS.nursing, 2)}</td><td className="numeric">{number(total.pharmacy)}</td><td className="numeric">{number(total.pharmacy * POINTS.pharmacy, 2)}</td><td className="numeric">{number(total.medicalAffairs)}</td><td className="numeric">{number(total.medicalAffairs * POINTS.medicalAffairs, 3)}</td><td className="numeric">{number(total.totalPoints, 3)}</td></tr></tfoot></table></div><p className="method-note">原始施打保留來源明細供對帳；護理點數採排除相同療程、藥品、時間與超過頻率上限後的有效施打。</p></Section>
             <div className="two-column wide-left"><Section title="每月點數趨勢"><Chart empty={!monthlyPoints.length}><ResponsiveContainer width="100%" height="100%"><AreaChart data={monthlyPoints} margin={{ top: 12, right: 14, left: -15, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={16} tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend /><Area dataKey="護理" stackId="a" stroke={COLORS[0]} fill={COLORS[0]} /><Area dataKey="藥劑" stackId="a" stroke={COLORS[1]} fill={COLORS[1]} /><Area dataKey="醫事" stackId="a" stroke={COLORS[2]} fill={COLORS[2]} /></AreaChart></ResponsiveContainer></Chart></Section><Section title="計算依據"><div className="rules"><div><Activity size={19} /><strong>護理</strong><span>注射抗生素逐次執行 × 0.1 點</span></div><div><Pill size={19} /><strong>藥劑</strong><span>有執行的去重藥品列 × 0.05 點</span></div><div><ClipboardList size={19} /><strong>醫事</strong><span>非 D1 帳號管理費申報 × 0.025 點</span></div><p>同醫令、同施打明細或同一預定日的 QD 單次施打先去重；跨月醫令在各有執行的月份各計一筆保管。</p></div></Section></div>
           </>}
 
           {view === 'cases' && <>
-            <div className="stats-grid">{statLine('範圍內療程', number(cases.length), '#087c72', Users)}{statLine('有施打紀錄', number(cases.filter(course => course.executionCount > 0).length), '#e57443', Stethoscope)}{statLine('到期完成療程', number(completionSummary?.completedCourses || 0), '#8b65a3', Check)}{statLine('排程資料不足', number(completionSummary?.unknownCourses || 0), '#d6a637', AlertTriangle)}</div>
+            <div className="stats-grid">{statLine('範圍內療程', number(cases.length), COLORS[0], Users)}{statLine('有施打紀錄', number(cases.filter(course => course.executionCount > 0).length), COLORS[1], Stethoscope)}{statLine('到期完成療程', number(completionSummary?.completedCourses || 0), COLORS[2], Check)}{statLine('排程資料不足', number(completionSummary?.unknownCourses || 0), COLORS[3], AlertTriangle)}</div>
             <Section title="療程清單" detail="門診 D1 與 D2-D7 依同院區病歷號及相近開案日期合併" action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} placeholder="帳號、病歷號、醫師、診斷" /></div>}><div className="table-scroll"><table><thead><tr><th>開案日期</th><th>院區</th><th>病歷號</th><th>帳號</th><th>來源</th><th>主診斷</th><th className="numeric">施打</th><th className="numeric">預定</th><th className="numeric">申報</th><th>療程狀態</th></tr></thead><tbody>{filteredCases.slice((page - 1) * pageSize, page * pageSize).map(course => { const progress = progressByCourse.get(course.id); return <tr key={course.id} className="clickable" onClick={() => setSelectedCourseId(course.id)}><td>{formatDate(course.openingDate)}</td><td>{course.campus}</td><td className="mono">{course.chartNo}</td><td className="mono accounts-cell">{course.accounts.join(' / ')}</td><td>{course.source}</td><td>{course.diagnosis || '—'}</td><td className="numeric">{number(course.executionCount)}</td><td className="numeric">{progress ? number(progress.expected) : '—'}</td><td className="numeric">{number(course.feeCount)}</td><td><span className={`status ${progress?.status === '未完成' || progress?.status === '中斷/轉診' ? 'danger' : progress?.status === '完成' ? 'good' : 'neutral'}`}>{progress?.status || courseStatus(course, data.snapshotDate)}</span></td></tr>; })}</tbody></table></div><Pagination page={page} total={filteredCases.length} size={pageSize} onChange={setPage} /></Section>
           </>}
 
           {view === 'audit' && <>
-            <div className="stats-grid">{statLine('待檢核項目', number(selectedIssues.length), '#e57443', AlertTriangle)}{statLine('已排除重複醫令', number(duplicateRows.filter(row => row.duplicateOf).length), '#8b65a3', Filter)}{statLine('相似醫令待核對', number(duplicateRows.filter(row => row.possibleDuplicateOf).length), '#d6a637', AlertTriangle)}{statLine('退量與執行並存', number(selectedIssues.filter(issue => issue.code === 'refund-execution').length), '#087c72', Check)}</div>
+            <div className="stats-grid">{statLine('待檢核項目', number(selectedIssues.length), COLORS[1], AlertTriangle)}{statLine('已排除重複醫令', number(duplicateRows.filter(row => row.duplicateOf).length), COLORS[2], Filter)}{statLine('相似醫令待核對', number(duplicateRows.filter(row => row.possibleDuplicateOf).length), COLORS[3], AlertTriangle)}{statLine('退量與執行並存', number(selectedIssues.filter(issue => issue.code === 'refund-execution').length), COLORS[0], Check)}</div>
             <Section title="藥品分類" detail={`僅列出注射抗生素與待確認注射品項；稀釋液及非 OPAT 抗生素已排除 ${number(excludedProductRows)} 原始列`}><div className="drug-list">{selectableDrugs.map(drug => <label className="drug-item" key={drug.code || drug.name}><input type="checkbox" checked={includedCodes.has(drug.code)} onChange={() => toggleDrug(drug.code)} /><span className="drug-check"><Check size={13} /></span><span className="drug-main"><strong>{drug.name}</strong><small>{drug.code || '無藥品碼'} · {number(drug.rows)} 列</small></span><span className={`kind kind-${drug.kind}`}>{drug.kind === 'injectable-antibiotic' ? '注射抗生素' : '待確認'}</span></label>)}</div></Section>
             <Section title="重複醫令核對" detail={`共 ${number(duplicateRows.length)} 列；已排除者不重複計入護理、藥劑及排程`}><div className="table-scroll"><table><thead><tr><th>判定</th><th>院區</th><th>帳號</th><th>執行人員明細</th><th>藥品</th><th>開始日</th><th>結束日</th><th>執行次數明細</th><th>對照執行明細</th><th>來源列</th><th>對照列</th></tr></thead><tbody>{duplicateRows.slice((duplicatePage - 1) * pageSize, duplicatePage * pageSize).map(row => { const counterpart = recordById.get(row.duplicateOf || row.possibleDuplicateOf || ''); return <tr key={row.id}><td><span className={`status ${row.duplicateOf ? 'neutral' : 'danger'}`}>{row.duplicateOf ? '已排除' : '待核對'}</span></td><td>{row.campus}</td><td className="mono">{row.account}</td><td>{row.executorDetail || '—'}</td><td>{row.drugName}</td><td className="nowrap">{formatDate(row.startDate)}</td><td className="nowrap">{formatDate(row.endDate)}</td><td className="nowrap">{row.detail || '—'}</td><td className="nowrap">{counterpart?.detail || '—'}</td><td className="mono nowrap">{row.file} #{row.rowNumber}</td><td className="mono nowrap">{counterpart?.file} #{counterpart?.rowNumber}</td></tr>; })}</tbody></table></div><Pagination page={duplicatePage} total={duplicateRows.length} size={pageSize} onChange={setDuplicatePage} /></Section>
             <Section title="異常與核對" detail={`共 ${number(selectedIssues.length)} 項；來源列可與原始 Excel 比對`} action={<label className="issue-select"><select value={issueFilter} onChange={event => { setIssueFilter(event.target.value); setPage(1); }}><option value="all">全部類型</option>{issueCodes.map(code => <option key={code}>{code}</option>)}</select><ChevronDown size={15} /></label>}><div className="table-scroll"><table><thead><tr><th>類型</th><th>院區</th><th>帳號</th><th>說明</th><th>來源列</th></tr></thead><tbody>{selectedIssues.slice((page - 1) * pageSize, page * pageSize).map((issue: DataIssue, index) => <tr key={`${issue.rowId}-${issue.code}-${index}`}><td><span className={`status ${issue.level === 'warning' ? 'neutral' : 'danger'}`}>{issue.code}</span></td><td>{issue.campus}</td><td className="mono">{issue.account}</td><td>{issue.message}</td><td className="mono">{data.records.find(row => row.id === issue.rowId)?.file}　#{data.records.find(row => row.id === issue.rowId)?.rowNumber}</td></tr>)}</tbody></table></div><Pagination page={page} total={selectedIssues.length} size={pageSize} onChange={setPage} /></Section>

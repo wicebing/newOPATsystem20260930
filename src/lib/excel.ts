@@ -1,8 +1,8 @@
 import * as XLSX from 'xlsx';
 import type { Analysis, Campus, PerformanceRow, SourceFile } from './opat';
-import { formatDate, isSelectedAntibiotic, reportingMonth } from './opat';
+import { CAMPUSES, formatDate, isSelectedAntibiotic, reportingMonth } from './opat';
 import { groupExecutors } from './staff';
-import { hourlyByCampus, prescribingMatrix } from './analytics';
+import { hourlyByCampus, prescribingMatrix, weeklyOrders } from './analytics';
 import { summarizeCompletion } from './completion';
 import type { CompletionReport } from './completion';
 
@@ -104,6 +104,14 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     日期: day.date, 藥品八碼: day.drugCode, 組合商品名: day.drugName,
     預定次數: day.expected, 實際次數: day.executed, 未完成次數: day.expected - day.executed,
   }));
+  const weekly = weeklyOrders(analysis, includedCodes, month);
+  const weeklyCampuses = campus === '全部院區' ? [...CAMPUSES, '全部院區' as const] : CAMPUSES.filter(name => name === campus);
+  const weeklyRows = weekly.courses.flatMap((opened, index) => weeklyCampuses.map(name => {
+    const planned = weekly.doses[index];
+    return { 週起日: opened.key, 週別: opened.name, 院區: name,
+      新療程: name === '全部院區' ? opened.total : opened[name],
+      預定施打次數: name === '全部院區' ? planned.total : planned[name] };
+  }));
   const issues = analysis.issues.filter(issue => {
     const row = recordById.get(issue.rowId);
     return (campus === '全部院區' || issue.campus === campus) &&
@@ -144,6 +152,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
   };
   append('績效總表', summary, ['月份', '院區', '護理執行次數', '藥劑保管筆數', '管理費申報數']);
   append('完成率', completionRows, ['月份', '院區', '預定施打', '已完成施打']);
+  append('每週開立量', weeklyRows, ['週起日', '週別', '院區', '新療程', '預定施打次數']);
   append('Step2原系統格式', legacyPerformance, ['campus', 'nursing', 'pharmacy', 'medicalAffairs']);
   append('執行人員統計', executors, ['院區', '人員代碼', '執行人員', '施打次數']);
   append('施打時段', hourlyRows, ['時段', '新竹', '竹北', '竹東', '合計']);

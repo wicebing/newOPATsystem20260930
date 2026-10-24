@@ -19,8 +19,10 @@ describe('Excel report', () => {
     const completion = buildCompletion(analysis, included, new Date(2026, 6, 25));
     const workbook = createReportWorkbook(analysis, report, '2026-07', '竹東', included, completion);
 
-    expect(workbook.SheetNames).toEqual(['績效總表', '完成率', 'Step2原系統格式', '執行人員統計', '施打時段', '醫師開立偏好',
+    expect(workbook.SheetNames).toEqual(['績效總表', '完成率', '每週開立量', 'Step2原系統格式', '執行人員統計', '施打時段', '醫師開立偏好',
       '施打明細', '療程明細', '排程對照', 'Step1清理資料', '重複醫令核對', '資料檢核']);
+    const weekly = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['每週開立量']);
+    expect(weekly[0]).toMatchObject({ 週起日: '2026-07-20', 院區: '竹東', 新療程: 1, 預定施打次數: 2 });
     const detail = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['施打明細']);
     expect(detail[0]).toMatchObject({ 院區: '竹東', 病歷號: 'G000001', 執行人員代碼: 'G00001', 執行人員: '王甲乙', 施打歸屬日: '2026-07-23' });
     const legacy = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Step1清理資料']);
