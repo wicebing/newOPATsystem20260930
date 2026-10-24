@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyze } from './opat';
-import { hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weeklyOrders } from './analytics';
+import { executionTrend, hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weeklyOrders } from './analytics';
 import type { RawRow } from './opat';
 
 const base: RawRow = {
@@ -12,6 +12,28 @@ const base: RawRow = {
 const row = (values: RawRow): RawRow => ({ ...base, ...values });
 
 describe('execution and prescribing analytics', () => {
+  it('assigns daily injections to 08:00-to-08:00 days, including both month boundaries', () => {
+    const data = analyze([{ name: '1151002_OPAT個案資料g.xlsx', rows: [
+      row({ 帳號: '26T70000011', 病歷號: 'G000011', 院區: '竹北', 執行次數明細: '2026/09/01 07:59',
+        開始日: '20260901', 結束日: '20260901' }),
+      row({ 帳號: '26T70000012', 病歷號: 'G000012', 院區: '竹東', 執行次數明細: '2026/09/01 08:00',
+        開始日: '20260901', 結束日: '20260901' }),
+      row({ 帳號: '26T40000013', 病歷號: 'H000013', 院區: '新竹', 執行次數明細: '2026/10/01 07:59',
+        開始日: '20261001', 結束日: '20261001' }),
+      row({ 帳號: '26T70000014', 病歷號: 'G000014', 院區: '竹東', 執行次數明細: '2026/10/01 08:00',
+        開始日: '20261001', 結束日: '20261001' }),
+    ] }]);
+    const september = executionTrend(data.executions, '2026-09');
+    expect(september).toHaveLength(30);
+    expect(september[0]).toMatchObject({ key: '2026-09-01', name: '9/1', 竹東: 1, 竹北: 0 });
+    expect(september.at(-1)).toMatchObject({ key: '2026-09-30', name: '9/30', 新竹: 1 });
+    expect(september.some(day => day.key === '2026-10-01')).toBe(false);
+    expect(executionTrend(data.executions, '2026-08').at(-1)).toMatchObject({ key: '2026-08-31', 竹北: 1 });
+    expect(executionTrend(data.executions, '2026-10')[0]).toMatchObject({ key: '2026-10-01', 竹東: 1, 新竹: 0 });
+    expect(executionTrend(data.executions).map(row => [row.key, row.新竹 + row.竹北 + row.竹東]))
+      .toEqual([['2026-08', 1], ['2026-09', 2], ['2026-10', 1]]);
+  });
+
   it('groups opened courses and prescribed injections by Monday weeks and campus', () => {
     const data = analyze([{ name: '1150804_OPAT個案資料g.xlsx', rows: [
       row({ 開始日: '20260801', 結束日: '20260802', 確認日期: '20260801' }),

@@ -17,7 +17,7 @@ import type { Analysis, Campus, DataIssue } from './lib/opat';
 import { buildCompletion, dailyComparison, summarizeCompletion } from './lib/completion';
 import type { DailyComparison } from './lib/completion';
 import { executorKey, groupExecutors } from './lib/staff';
-import { hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weeklyOrders } from './lib/analytics';
+import { executionTrend, hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weeklyOrders } from './lib/analytics';
 import type { HourlyRow, WeeklyRow } from './lib/analytics';
 
 type View = 'overview' | 'execution' | 'prescribing' | 'staff' | 'performance' | 'cases' | 'audit';
@@ -308,24 +308,7 @@ export default function App() {
       row.confirmDate && formatDate(row.confirmDate).startsWith(month) ||
       row.startDate && formatDate(row.startDate).startsWith(month))) || [];
 
-  const trend = useMemo(() => {
-    const groups = new Map<string, Record<string, string | number>>();
-    if (month !== 'all') {
-      const [year, m] = month.split('-').map(Number);
-      const days = new Date(year, m, 0).getDate();
-      for (let day = 1; day <= days; day++) {
-        const key = `${month}-${String(day).padStart(2, '0')}`;
-        groups.set(key, { name: `${m}/${day}`, key, 新竹: 0, 竹北: 0, 竹東: 0 });
-      }
-    }
-    events.forEach(event => {
-      const key = month === 'all' ? event.month : event.date;
-      const row = groups.get(key) || { name: key, key, 新竹: 0, 竹北: 0, 竹東: 0 };
-      row[event.campus] = Number(row[event.campus] || 0) + 1;
-      groups.set(key, row);
-    });
-    return [...groups.values()].sort((a, b) => String(a.key).localeCompare(String(b.key)));
-  }, [events, month]);
+  const trend = useMemo(() => executionTrend(events, month), [events, month]);
 
   const hourly = useMemo(() => hourlyByCampus(events), [events]);
   const byWeekday = useMemo(() => ['日', '一', '二', '三', '四', '五', '六'].map((day, index) => ({
@@ -460,7 +443,7 @@ export default function App() {
             </div>
             {campus === '全部院區' && <Section title="各院區預定與實際施打" detail="三院區各自呈現，預定與實際可直接比較"><div className="campus-comparisons">{campusComparison.map(item => <div key={item.name} className="campus-comparison"><h3>{item.name}</h3><ComparisonChart values={item.values} /></div>)}</div></Section>}
             <div className="two-column wide-left trend-row">
-              <Section title={month === 'all' ? '每月執行趨勢' : '每日執行趨勢'} detail="月份於 08:00 切分；每日圖使用實際施打日期">
+              <Section title={month === 'all' ? '每月執行趨勢' : '每日執行趨勢'} detail="每日 08:00 至次日 08:00 歸屬同一天，與績效月份切分一致">
                 <ExecutionTrend values={trend} campus={campus} empty={!events.length} />
               </Section>
               <Section title="各院區執行量" detail="依績效月份與院區列示">
@@ -513,7 +496,7 @@ export default function App() {
               {statLine('注射藥品種類', number(new Set(events.map(event => event.drugCode)).size), COLORS[2], Pill)}
             </div>
             <div className="two-column wide-left trend-row">
-              <Section title={month === 'all' ? '每月施打次數' : '每日施打次數'}><ExecutionTrend values={trend} campus={campus} empty={!events.length} /></Section>
+              <Section title={month === 'all' ? '每月施打次數' : '每日施打次數'} detail="每日 08:00 至次日 08:00 歸屬同一天"><ExecutionTrend values={trend} campus={campus} empty={!events.length} /></Section>
               <Section title="施打時段" detail="實際時間，以整點分組；三院區堆疊並使用相同刻度各自比較"><HourlyDistribution values={hourly} campus={campus} empty={!events.length} /></Section>
             </div>
             <Section title="藥品施打排行" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} axisWidth={110} /></Section>

@@ -73,6 +73,32 @@ export interface HourlyRow {
   total: number;
 }
 
+export type ExecutionTrendRow = { key: string; name: string } & Record<KnownCampus, number>;
+
+export function executionTrend(events: Execution[], month = 'all'): ExecutionTrendRow[] {
+  const groups = new Map<string, ExecutionTrendRow>();
+  const rowFor = (key: string): ExecutionTrendRow => ({
+    key,
+    name: month === 'all' ? key : `${Number(key.slice(5, 7))}/${Number(key.slice(8, 10))}`,
+    新竹: 0, 竹北: 0, 竹東: 0,
+  });
+  if (month !== 'all') {
+    const [year, m] = month.split('-').map(Number);
+    for (let day = 1; day <= new Date(year, m, 0).getDate(); day++) {
+      const key = `${month}-${String(day).padStart(2, '0')}`;
+      groups.set(key, rowFor(key));
+    }
+  }
+  events.forEach(event => {
+    if (!CAMPUSES.includes(event.campus as KnownCampus) || (month !== 'all' && event.month !== month)) return;
+    const key = month === 'all' ? event.month : event.reportingDate;
+    const row = groups.get(key) || rowFor(key);
+    row[event.campus as KnownCampus] += 1;
+    groups.set(key, row);
+  });
+  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
 export function hourlyByCampus(events: Execution[]): HourlyRow[] {
   const hours = Array.from({ length: 24 }, (_, hour) => ({
     name: `${String(hour).padStart(2, '0')}:00`, 新竹: 0, 竹北: 0, 竹東: 0, total: 0,
