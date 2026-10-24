@@ -1,5 +1,5 @@
 import { CAMPUSES, formatDate, isSelectedAntibiotic } from './opat';
-import type { Analysis, Campus, Execution, KnownCampus } from './opat';
+import type { Analysis, Campus, Execution, KnownCampus, RecordRow } from './opat';
 import { scheduledDoses } from './completion';
 
 export interface WeeklyRow {
@@ -46,6 +46,23 @@ export function weeklyOrders(analysis: Analysis, includedCodes: Set<string>, mon
     courses: weeks.map(key => courseCounts.get(key) || weeklyRow(key)),
     doses: weeks.map(key => doseCounts.get(key) || weeklyRow(key)),
   };
+}
+
+export function selectedAntibioticOrders(analysis: Analysis, includedCodes: Set<string>, month: string, campus: Campus | '全部院區'): RecordRow[] {
+  return analysis.records.filter(row => {
+    if (row.duplicateOf || !isSelectedAntibiotic(row.drugCode, row.kind, includedCodes) ||
+      (campus !== '全部院區' && row.campus !== campus)) return false;
+    if (month === 'all') return true;
+    const start = row.startDate || row.confirmDate || row.visitDate;
+    const end = row.endDate || start;
+    return Boolean(start && end && formatDate(start) <= `${month}-31` && formatDate(end) >= `${month}-01`);
+  }).sort((a, b) => (b.startDate?.getTime() || b.confirmDate?.getTime() || 0) -
+    (a.startDate?.getTime() || a.confirmDate?.getTime() || 0) || a.file.localeCompare(b.file) || a.rowNumber - b.rowNumber);
+}
+
+export function nonQdOrders(analysis: Analysis, includedCodes: Set<string>, month: string, campus: Campus | '全部院區'): RecordRow[] {
+  return selectedAntibioticOrders(analysis, includedCodes, month, campus)
+    .filter(row => row.frequency.trim().toUpperCase() !== 'QD');
 }
 
 export interface HourlyRow {

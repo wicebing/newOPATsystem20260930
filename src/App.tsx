@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent, ReactNode } from 'react';
 import {
-  Activity, AlertTriangle, ArrowDownToLine, Check, ChevronDown, ClipboardList,
+  Activity, AlertTriangle, ArrowDownToLine, CalendarDays, Check, ChevronDown, ClipboardList,
   FileSpreadsheet, Filter, FolderOpen, LayoutDashboard, Pill, Plus, Search,
   ShieldCheck, Stethoscope, Trash2, Users, X,
 } from 'lucide-react';
@@ -17,14 +17,15 @@ import type { Analysis, Campus, DataIssue } from './lib/opat';
 import { buildCompletion, dailyComparison, summarizeCompletion } from './lib/completion';
 import type { DailyComparison } from './lib/completion';
 import { executorKey, groupExecutors } from './lib/staff';
-import { hourlyByCampus, prescribingMatrix, weeklyOrders } from './lib/analytics';
+import { hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weeklyOrders } from './lib/analytics';
 import type { HourlyRow, WeeklyRow } from './lib/analytics';
 
-type View = 'overview' | 'execution' | 'staff' | 'performance' | 'cases' | 'audit';
-const COLORS = ['#197b72', '#d47758', '#557db5', '#ae8641', '#826d9a', '#789198'];
+type View = 'overview' | 'execution' | 'prescribing' | 'staff' | 'performance' | 'cases' | 'audit';
+const COLORS = ['#0b8591', '#e47758', '#4869c6', '#ab813c', '#8164ac', '#58939a'];
 const NAV: { id: View; label: string; icon: LucideIcon }[] = [
   { id: 'overview', label: '總覽', icon: LayoutDashboard },
   { id: 'execution', label: '執行分析', icon: Activity },
+  { id: 'prescribing', label: '開立分析', icon: CalendarDays },
   { id: 'staff', label: '執行人員', icon: Users },
   { id: 'performance', label: '績效點數', icon: ClipboardList },
   { id: 'cases', label: '個案明細', icon: Users },
@@ -148,6 +149,7 @@ export default function App() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [selectedExecutorKey, setSelectedExecutorKey] = useState<string | null>(null);
   const [showAllDoctors, setShowAllDoctors] = useState(false);
+  const [orderSearch, setOrderSearch] = useState('');
   const [executorPage, setExecutorPage] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -349,11 +351,16 @@ export default function App() {
     }));
   }, [events]);
   const prescribing = useMemo(() => data ? prescribingMatrix(data, includedCodes, month, campus) : { drugs: [], doctors: [] }, [data, includedCodes, month, campus]);
+  const orders = useMemo(() => data ? selectedAntibioticOrders(data, includedCodes, month, campus) : [], [data, includedCodes, month, campus]);
+  const nonQd = useMemo(() => data ? nonQdOrders(data, includedCodes, month, campus) : [], [data, includedCodes, month, campus]);
+  const filteredNonQd = useMemo(() => nonQd.filter(row => !orderSearch ||
+    [row.doctor, row.department, row.drugName, row.drugCode, row.frequency, row.account, row.file]
+      .some(value => value.toLowerCase().includes(orderSearch.toLowerCase()))), [nonQd, orderSearch]);
   const byFrequency = useMemo(() => {
     const groups = new Map<string, number>();
-    events.forEach(event => groups.set(event.frequency || '未填', (groups.get(event.frequency || '未填') || 0) + 1));
+    orders.forEach(row => groups.set(row.frequency || '未填', (groups.get(row.frequency || '未填') || 0) + 1));
     return [...groups].sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
-  }, [events]);
+  }, [orders]);
   const doctorStats = useMemo(() => {
     const groups = new Map<string, { doctor: string; department: string; executions: number; cases: Set<string> }>();
     events.forEach(event => {
@@ -405,12 +412,12 @@ export default function App() {
 
     <main className="main">
       <header className="topbar"><div className="mobile-brand"><Activity size={21} /> OPAT</div><span className="topbar-title">OPAT 執行與績效分析</span><div className="topbar-actions">
-        {data && completion && <button className="button ghost export-button" onClick={() => void import('./lib/excel').then(({ downloadReport }) => downloadReport(data, report, month, campus, includedCodes, completion))}><ArrowDownToLine size={17} /> 匯出 Excel 報表</button>}
+        {data && completion && <button className="button ghost export-button" aria-label="匯出 Excel 報表" title="匯出 Excel 報表" onClick={() => void import('./lib/excel').then(({ downloadReport }) => downloadReport(data, report, month, campus, includedCodes, completion))}><ArrowDownToLine size={17} /><span className="export-label">匯出 Excel 報表</span></button>}
         <button className="button primary" onClick={choose} disabled={busy}><Plus size={17} /> 新增 Excel</button>
       </div></header>
       <div className="mobile-nav">{NAV.map(item => <button key={item.id} className={view === item.id ? 'active' : ''} onClick={() => switchView(item.id)}>{item.label}</button>)}</div>
       <div className="content">
-        <div className="page-heading"><div><p className="eyebrow">OPAT REPORTING</p><h1>{NAV.find(item => item.id === view)?.label}</h1><p className="page-subtitle">{data ? `已載入 ${number(data.records.length)} 筆原始資料、${number(data.courses.length)} 個療程 · 資料快照 ${formatDate(data.snapshotDate)}${data.snapshotSource === 'system' ? '（系統日期）' : ''}` : '匯入原始個案資料後即可檢視分析'}</p></div>
+        <div className="page-heading"><div><h1>{NAV.find(item => item.id === view)?.label}</h1><p className="page-subtitle">{data ? `已載入 ${number(data.records.length)} 筆原始資料、${number(data.courses.length)} 個療程 · 資料快照 ${formatDate(data.snapshotDate)}${data.snapshotSource === 'system' ? '（系統日期）' : ''}` : '匯入原始個案資料後即可檢視分析'}</p></div>
           {data && <div className="filters"><label><span>績效月份</span><select value={month} onChange={event => { setMonth(event.target.value); setPage(1); setDuplicatePage(1); }}><option value="all">全部期間</option>{data.months.map(key => <option key={key} value={key}>{key}</option>)}</select><ChevronDown size={15} /></label><label><span>院區</span><select value={campus} onChange={event => { setCampus(event.target.value as Campus | '全部院區'); setPage(1); setDuplicatePage(1); }}><option>全部院區</option>{CAMPUSES.map(name => <option key={name}>{name}</option>)}</select><ChevronDown size={15} /></label></div>}
         </div>
 
@@ -423,27 +430,12 @@ export default function App() {
         {data && <>
           {view === 'overview' && <>
             <div className="stats-grid">
-              {statLine('本期新開療程', number(newCases.length), COLORS[0], Users)}
-              {statLine('注射抗生素施打', number(total.nursing), COLORS[1], Activity)}
-              {statLine('藥品保管筆數', number(total.pharmacy), COLORS[2], Pill)}
-              {statLine('管理費申報', number(total.medicalAffairs), COLORS[3], ClipboardList)}
+              {statLine('本期計分施打', number(total.nursing), COLORS[0], Activity)}
+              {statLine('施打完成率', percentage(completionSummary?.doseRate ?? null), COLORS[2], Check)}
+              {statLine('未完成施打', number(completionSummary?.missed || 0), COLORS[1], AlertTriangle)}
+              {statLine('到期療程完成率', percentage(completionSummary?.courseRate ?? null), COLORS[4], ShieldCheck)}
             </div>
-            <Section title="每週開立新療程" detail="依療程最早確認／看診日歸週；門診 D1 與 D2 合併為一療程，週一至週日">
-              <WeeklyChart values={weekly.courses} campus={campus} unit="療程" />
-            </Section>
-            <Section title="每週開立施打次數" detail="依注射抗生素開始／結束日與頻率推算預定施打；包含尚未到期的醫令，不等於實際施打">
-              <WeeklyChart values={weekly.doses} campus={campus} unit="次" />
-            </Section>
-            <Section title="每週開立量明細" detail="所選月份僅計入日期落在該月的開案與預定施打，跨月週別仍以週一標示">
-              <div className="table-scroll"><table className={`weekly-table ${campus === '全部院區' ? 'all-campus' : ''}`}><thead><tr><th rowSpan={2}>週別</th><th colSpan={weeklyCampuses.length + (campus === '全部院區' ? 1 : 0)}>新療程</th><th colSpan={weeklyCampuses.length + (campus === '全部院區' ? 1 : 0)}>預定施打次數</th></tr><tr>{weeklyCampuses.map(name => <th key={`course-${name}`} className="numeric">{name}</th>)}{campus === '全部院區' && <th className="numeric">合計</th>}{weeklyCampuses.map(name => <th key={`dose-${name}`} className="numeric">{name}</th>)}{campus === '全部院區' && <th className="numeric">合計</th>}</tr></thead><tbody>{weekly.courses.map((opened, index) => { const planned = weekly.doses[index]; return <tr key={opened.key}><td className="emph">{opened.key} · {opened.name}</td>{weeklyCampuses.map(name => <td key={`course-${name}`} className="numeric">{number(opened[name])}</td>)}{campus === '全部院區' && <td className="numeric emph">{number(opened.total)}</td>}{weeklyCampuses.map(name => <td key={`dose-${name}`} className="numeric">{number(planned[name])}</td>)}{campus === '全部院區' && <td className="numeric emph">{number(planned.total)}</td>}</tr>; })}</tbody></table></div>
-            </Section>
             <Section title="執行完成率" detail={`依檔名下載日 ${formatDate(data.snapshotDate)} 判定；僅統計截至 ${completion?.asOf || '—'} 的排程，中斷或轉診及資料不足者不列入分母。`}>
-              <div className="stats-grid completion-stats">
-                {statLine('預定施打', number(completionSummary?.expected || 0), COLORS[0], ClipboardList)}
-                {statLine('已完成施打', number(completionSummary?.executed || 0), COLORS[1], Activity)}
-                {statLine('施打完成率', percentage(completionSummary?.doseRate ?? null), COLORS[2], Check)}
-                {statLine('到期療程完成率', percentage(completionSummary?.courseRate ?? null), COLORS[3], ShieldCheck)}
-              </div>
               <div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">預定施打</th><th className="numeric">已完成</th><th className="numeric">未完成</th><th>施打完成率</th><th className="numeric">到期療程</th><th className="numeric">完成療程</th><th>療程完成率</th></tr></thead><tbody>{completionByCampus.filter(row => campus === '全部院區' || row.name === campus).map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.expected)}</td><td className="numeric">{number(row.executed)}</td><td className="numeric">{number(row.missed)}</td><td><div className="rate-cell"><strong>{percentage(row.doseRate)}</strong><meter min="0" max="1" value={row.doseRate || 0} aria-label={`${row.name}施打完成率`} /></div></td><td className="numeric">{number(row.dueCourses)}</td><td className="numeric">{number(row.completedCourses)}</td><td><div className="rate-cell"><strong>{percentage(row.courseRate)}</strong><meter min="0" max="1" value={row.courseRate || 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div>
               {(completionSummary?.interruptedCourses || completionSummary?.unknownCourses) ? <p className="method-note">另有中斷／轉診 {number(completionSummary?.interruptedCourses || 0)} 療程、排程資料不足 {number(completionSummary?.unknownCourses || 0)} 療程，未列入到期療程完成率。</p> : null}
             </Section>
@@ -468,6 +460,37 @@ export default function App() {
             <div className="insight-row"><div><strong>{number(cases.filter(course => course.failed).length)}</strong><span>標記失敗個案</span></div><div><strong>{number(cases.filter(course => course.transferred).length)}</strong><span>轉急診 / 住院</span></div><div><strong>{number(cases.filter(course => course.accounts.length > 1).length)}</strong><span>合併的 D1 / D2 療程</span></div><div><strong>{number(selectedIssues.length)}</strong><span>待檢核項目</span></div><button onClick={() => switchView('audit')}>查看資料檢核 →</button></div>
           </>}
 
+          {view === 'prescribing' && <>
+            <div className="stats-grid three">
+              {statLine('本期新開療程', number(newCases.length), COLORS[0], Users)}
+              {statLine('預定施打次數', number(weekly.doses.reduce((sum, row) => sum + weeklyCampuses.reduce((part, name) => part + row[name], 0), 0)), COLORS[2], CalendarDays)}
+              {statLine('非 QD 醫令', number(nonQd.length), COLORS[1], ClipboardList)}
+            </div>
+            <Section title="每週開立新療程" detail="依療程最早確認／看診日歸週；門診 D1 與 D2 合併為一療程，週一至週日">
+              <WeeklyChart values={weekly.courses} campus={campus} unit="療程" />
+            </Section>
+            <Section title="每週開立施打次數" detail="依注射抗生素開始／結束日與頻率推算預定施打；包含尚未到期的醫令，不等於實際施打">
+              <WeeklyChart values={weekly.doses} campus={campus} unit="次" />
+            </Section>
+            <Section title="每週開立量明細" detail="所選月份僅計入日期落在該月的開案與預定施打，跨月週別仍以週一標示">
+              <div className="table-scroll"><table className={`weekly-table ${campus === '全部院區' ? 'all-campus' : ''}`}><thead><tr><th rowSpan={2}>週別</th><th colSpan={weeklyCampuses.length + (campus === '全部院區' ? 1 : 0)}>新療程</th><th colSpan={weeklyCampuses.length + (campus === '全部院區' ? 1 : 0)}>預定施打次數</th></tr><tr>{weeklyCampuses.map(name => <th key={`course-${name}`} className="numeric">{name}</th>)}{campus === '全部院區' && <th className="numeric">合計</th>}{weeklyCampuses.map(name => <th key={`dose-${name}`} className="numeric">{name}</th>)}{campus === '全部院區' && <th className="numeric">合計</th>}</tr></thead><tbody>{weekly.courses.map((opened, index) => { const planned = weekly.doses[index]; return <tr key={opened.key}><td className="emph">{opened.key} · {opened.name}</td>{weeklyCampuses.map(name => <td key={`course-${name}`} className="numeric">{number(opened[name])}</td>)}{campus === '全部院區' && <td className="numeric emph">{number(opened.total)}</td>}{weeklyCampuses.map(name => <td key={`dose-${name}`} className="numeric">{number(planned[name])}</td>)}{campus === '全部院區' && <td className="numeric emph">{number(planned.total)}</td>}</tr>; })}</tbody></table></div>
+            </Section>
+            <Section title="醫令頻率" detail="去重後的注射抗生素醫令筆數，非施打次數；選定月份依醫令起訖日重疊判定">
+              <Chart empty={!byFrequency.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={byFrequency} layout="vertical" margin={{ top: 16, right: 18, left: 0, bottom: 8 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={68} /><Tooltip /><Bar dataKey="value" name="醫令筆數" fill={COLORS[2]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart>
+            </Section>
+            <Section title="非 QD 醫令明細" detail={`共 ${number(nonQd.length)} 筆；包含頻率未填的醫令，稀釋液／口服藥與重複資料已排除`}
+              action={<div className="search"><Search size={16} /><input aria-label="搜尋非 QD 醫令" value={orderSearch} onChange={event => { setOrderSearch(event.target.value); setPage(1); }} placeholder="醫師、藥品、頻率、帳號" /></div>}>
+              <div className="table-scroll"><table><thead><tr><th>院區</th><th>醫師</th><th>注射抗生素</th><th>頻率</th><th>科別</th><th>開始日</th><th>結束日</th><th>帳號</th><th>來源列</th></tr></thead><tbody>{filteredNonQd.slice((page - 1) * pageSize, page * pageSize).map(row => <tr key={row.id}><td>{row.campus}</td><td className="emph">{row.doctor || '未填'}</td><td>{row.drugName}</td><td><span className="status frequency-tag">{row.frequency || '未填'}</span></td><td>{row.department || '未填'}</td><td className="nowrap">{formatDate(row.startDate)}</td><td className="nowrap">{formatDate(row.endDate)}</td><td className="mono">{row.account}</td><td className="mono nowrap">{sourceReference(row.id)}</td></tr>)}</tbody></table></div>
+              {!filteredNonQd.length && <p className="method-note">此範圍沒有符合條件的非 QD 醫令。</p>}
+              <Pagination page={page} total={filteredNonQd.length} size={pageSize} onChange={setPage} />
+            </Section>
+            <Section title="醫師抗生素開立偏好" detail="依療程開案月份；各格為開立此藥的療程數，占該醫師 OPAT 療程數的比例"
+              action={prescribing.doctors.length > 15 ? <button className="button ghost" onClick={() => setShowAllDoctors(value => !value)}>{showAllDoctors ? '顯示前 15 位' : `顯示全部 ${number(prescribing.doctors.length)} 位`}</button> : undefined}>
+              {prescribing.doctors.length && prescribing.drugs.length ? <div className="table-scroll prescribing-scroll"><table className="prescribing-table"><thead><tr><th className="doctor-column">醫師</th><th>院區</th><th className="numeric">OPAT 療程</th>{prescribing.drugs.map(drug => <th key={drug.code} title={drug.name}><span>{drug.name.replace(/\s+\d.*$/, '')}</span><small>{drug.code}</small></th>)}</tr></thead><tbody>{prescribing.doctors.slice(0, showAllDoctors ? undefined : 15).map(doctor => <tr key={doctor.key}><td className="doctor-column"><strong>{doctor.doctor}</strong><small>{doctor.department || '科別未填'}</small></td><td>{doctor.campus}</td><td className="numeric emph">{number(doctor.courses)}</td>{prescribing.drugs.map(drug => { const entry = doctor.byDrug[drug.code]; return <td key={drug.code} className="heat-td">{entry ? <span className="heat-cell" style={{ backgroundColor: `rgba(37, 99, 235, ${0.08 + entry.rate * 0.35})` }} title={`${doctor.doctor}：${drug.name}，${entry.courses} / ${doctor.courses} 療程`}><strong>{percentage(entry.rate)}</strong><small>{entry.courses} / {doctor.courses}</small></span> : <span className="heat-empty">—</span>}</td>; })}</tr>)}</tbody></table></div> : <div className="chart-empty heat-empty-state">此範圍沒有可分析的醫師與注射抗生素開立資料</div>}
+              <p className="method-note">每個療程對每種藥只計一次；同一療程可能開立多種抗生素，因此各藥比例不一定合計 100%。</p>
+            </Section>
+          </>}
+
           {view === 'execution' && <>
             <div className="stats-grid three">
               {statLine('施打總次數', number(events.length), COLORS[0], Activity)}
@@ -478,13 +501,8 @@ export default function App() {
               <Section title={month === 'all' ? '每月施打次數' : '每日施打次數'}><ExecutionTrend values={trend} campus={campus} empty={!events.length} /></Section>
               <Section title="施打時段" detail="實際時間，以整點分組；三院區堆疊並使用相同刻度各自比較"><HourlyDistribution values={hourly} campus={campus} empty={!events.length} /></Section>
             </div>
-            <div className="two-column"><Section title="藥品施打排行" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} color={COLORS[0]} axisWidth={110} /></Section><Section title="醫令頻率"><Chart empty={!byFrequency.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={byFrequency} layout="vertical" margin={{ top: 16, right: 18, left: 0, bottom: 8 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={68} /><Tooltip /><Bar dataKey="value" name="施打次數" fill={COLORS[2]} radius={[0, 3, 3, 0]} /></BarChart></ResponsiveContainer></Chart></Section></div>
+            <Section title="藥品施打排行" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} color={COLORS[0]} axisWidth={110} /></Section>
             <div className="two-column"><Section title="星期分布" detail="實際施打時間"><Chart empty={!events.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={byWeekday} margin={{ top: 12, right: 10, left: -22, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="次數" fill={COLORS[4]} radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></Chart></Section><Section title="各藥品預定施打完成" detail="排程日與實際施打時間比對"><div className="table-scroll"><table><thead><tr><th>藥品</th><th className="numeric">預定</th><th className="numeric">完成</th><th className="numeric">未完成</th><th>完成率</th></tr></thead><tbody>{completionByDrug.slice(0, 12).map(drug => <tr key={drug.code}><td title={drug.name}>{drug.name}</td><td className="numeric">{number(drug.expected)}</td><td className="numeric">{number(drug.executed)}</td><td className="numeric">{number(drug.expected - drug.executed)}</td><td className="emph">{percentage(drug.expected ? drug.executed / drug.expected : null)}</td></tr>)}</tbody></table></div></Section></div>
-            <Section title="醫師抗生素開立偏好" detail="依療程開案月份；各格為開立此藥的療程數，占該醫師 OPAT 療程數的比例"
-              action={prescribing.doctors.length > 15 ? <button className="button ghost" onClick={() => setShowAllDoctors(value => !value)}>{showAllDoctors ? '顯示前 15 位' : `顯示全部 ${number(prescribing.doctors.length)} 位`}</button> : undefined}>
-              {prescribing.doctors.length && prescribing.drugs.length ? <div className="table-scroll prescribing-scroll"><table className="prescribing-table"><thead><tr><th className="doctor-column">醫師</th><th>院區</th><th className="numeric">OPAT 療程</th>{prescribing.drugs.map(drug => <th key={drug.code} title={drug.name}><span>{drug.name.replace(/\s+\d.*$/, '')}</span><small>{drug.code}</small></th>)}</tr></thead><tbody>{prescribing.doctors.slice(0, showAllDoctors ? undefined : 15).map(doctor => <tr key={doctor.key}><td className="doctor-column"><strong>{doctor.doctor}</strong><small>{doctor.department || '科別未填'}</small></td><td>{doctor.campus}</td><td className="numeric emph">{number(doctor.courses)}</td>{prescribing.drugs.map(drug => { const entry = doctor.byDrug[drug.code]; return <td key={drug.code} className="heat-td">{entry ? <span className="heat-cell" style={{ backgroundColor: `rgba(8, 124, 114, ${0.08 + entry.rate * 0.44})` }} title={`${doctor.doctor}：${drug.name}，${entry.courses} / ${doctor.courses} 療程`}><strong>{percentage(entry.rate)}</strong><small>{entry.courses} / {doctor.courses}</small></span> : <span className="heat-empty">—</span>}</td>; })}</tr>)}</tbody></table></div> : <div className="chart-empty heat-empty-state">此範圍沒有可分析的醫師與注射抗生素開立資料</div>}
-              <p className="method-note">每個療程對每種藥只計一次；同一療程可能開立多種抗生素，因此各藥比例不一定合計 100%。</p>
-            </Section>
             <Section title="科別與醫師" detail="依施打次數排序"><div className="table-scroll"><table><thead><tr><th>科別</th><th>醫師</th><th className="numeric">療程數</th><th className="numeric">施打次數</th></tr></thead><tbody>{doctorStats.map((item, index) => <tr key={index}><td>{item.department}</td><td>{item.doctor}</td><td className="numeric">{number(item.cases.size)}</td><td className="numeric emph">{number(item.executions)}</td></tr>)}</tbody></table></div></Section>
             <Section title="施打紀錄" detail={`共 ${number(filteredEvents.length)} 次`} action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} placeholder="帳號、病歷號、藥品、醫師、人員" /></div>}><div className="table-scroll"><table><thead><tr><th>執行時間</th><th>施打歸屬日</th><th>績效月</th><th>院區</th><th>執行人員</th><th>人員代碼</th><th>帳號</th><th>病歷號</th><th>注射抗生素</th><th>頻率</th><th>來源列</th></tr></thead><tbody>{filteredEvents.slice((page - 1) * pageSize, page * pageSize).map(event => <tr key={event.id}><td className="nowrap">{formatDate(event.time, true)}</td><td className="nowrap">{event.attributedDate}</td><td>{event.month}</td><td>{event.campus}</td><td>{event.executorName || '未記錄'}</td><td className="mono">{event.executorId || '—'}</td><td className="mono">{event.account}</td><td className="mono">{event.chartNo}</td><td>{event.drugName}</td><td>{event.frequency}</td><td className="mono nowrap">{sourceReference(event.rowId)}</td></tr>)}</tbody></table></div><Pagination page={page} total={filteredEvents.length} size={pageSize} onChange={setPage} /></Section>
           </>}

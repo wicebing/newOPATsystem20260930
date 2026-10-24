@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyze } from './opat';
-import { hourlyByCampus, prescribingMatrix, weeklyOrders } from './analytics';
+import { hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weeklyOrders } from './analytics';
 import type { RawRow } from './opat';
 
 const base: RawRow = {
@@ -75,5 +75,28 @@ describe('execution and prescribing analytics', () => {
     expect(matrix.drugs.map(drug => drug.code)).toEqual(['SIN1AB20']);
     expect(matrix.doctors).toMatchObject([{ doctor: '測試醫師甲', courses: 1 }]);
     expect(matrix.doctors[0].byDrug.SIN1AB20).toEqual({ courses: 1, rate: 1 });
+  });
+
+  it('lists non-QD antibiotic orders with prescriber and drug once per order, not per execution', () => {
+    const data = analyze([{ name: '1150908_OPAT個案資料g.xlsx', rows: [
+      row({ 帳號: '26T70000011', 病歷號: 'G000011', 看診醫師: '測試醫師乙', 頻率: 'Q12H',
+        開始日: '20260831', 結束日: '20260902', 執行次數: 2,
+        執行次數明細: '2026/09/01 09:00, 2026/09/01 21:00' }),
+      row({ 帳號: '26T70000011', 病歷號: 'G000011', 看診醫師: '測試醫師乙', 頻率: 'Q12H',
+        開始日: '20260831', 結束日: '20260902', 執行次數: 2,
+        執行次數明細: '2026/09/01 09:00, 2026/09/01 21:00' }),
+      row({ 帳號: '26T70000012', 病歷號: 'G000012', 頻率: 'QD', 開始日: '20260901', 結束日: '20260901' }),
+      row({ 帳號: '26T70000013', 病歷號: 'G000013', 頻率: 'BID', 開始日: '20260801', 結束日: '20260801' }),
+      row({ 帳號: '26T70000014', 病歷號: 'G000014', 頻率: 'Q12H', 開始日: '20260901', 結束日: '20260901',
+        藥品八碼: 'SAL1FAD0', 組合商品名: '100 Saline inj 0.9% 100 mL /bag' }),
+    ] }]);
+    const selected = new Set(['SIN1AB20', 'SAL1FAD0']);
+    const allOrders = selectedAntibioticOrders(data, selected, '2026-09', '竹東');
+    const nonQd = nonQdOrders(data, selected, '2026-09', '竹東');
+    expect(allOrders).toHaveLength(2);
+    expect(nonQd).toHaveLength(1);
+    expect(nonQd[0]).toMatchObject({ doctor: '測試醫師乙', drugName: 'Sintrix 500 mg/vial', frequency: 'Q12H', account: '26T70000011' });
+    expect(nonQdOrders(data, selected, '2026-08', '竹東').map(item => item.account)).toEqual(['26T70000011', '26T70000013']);
+    expect(nonQdOrders(data, selected, '2026-09', '新竹')).toHaveLength(0);
   });
 });
