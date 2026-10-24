@@ -32,14 +32,29 @@ describe('Excel import queue', () => {
       { target: { files: [new File(['g'], '1151002_OPAT個案資料g.xlsx')] } });
     fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
     await screen.findByText(/已載入 4 筆原始資料、3 個療程/);
+    const newCourseCount = (tableName: string, group: string) => {
+      const table = screen.getByRole('table', { name: tableName });
+      const row = [...table.querySelectorAll<HTMLTableRowElement>('tbody tr')].find(item => item.cells[0]?.textContent === group);
+      return row?.cells[1]?.textContent;
+    };
+    const overviewCards = container.querySelector('.overview-stats') as HTMLElement;
 
     fireEvent.change(screen.getByLabelText('績效月份'), { target: { value: '2026-09' } });
-    expect(screen.getByText('本期新增療程').closest('.stat')?.querySelector('strong')?.textContent).toBe('2');
+    expect(within(overviewCards).getByText('本期新增療程').closest('.stat')?.querySelector('strong')?.textContent).toBe('2');
+    expect(newCourseCount('依院區執行完成率', '竹東')).toBe('1');
+    expect(newCourseCount('依院區執行完成率', '竹北')).toBe('1');
+    expect(newCourseCount('依療程來源執行完成率', '門診')).toBe('1');
+    expect(newCourseCount('依療程來源執行完成率', '住院')).toBe('0');
+    expect(newCourseCount('依療程來源執行完成率', '急診')).toBe('1');
+    expect(within(screen.getByRole('table', { name: '依療程來源執行完成率' })).getByRole('columnheader', { name: '施打完成率' })).toBeTruthy();
     fireEvent.change(screen.getByLabelText('院區'), { target: { value: '竹東' } });
-    expect(screen.getByText('本期新增療程').closest('.stat')?.querySelector('strong')?.textContent).toBe('1');
+    expect(within(overviewCards).getByText('本期新增療程').closest('.stat')?.querySelector('strong')?.textContent).toBe('1');
+    expect(newCourseCount('依療程來源執行完成率', '急診')).toBe('0');
     fireEvent.change(screen.getByLabelText('績效月份'), { target: { value: 'all' } });
     fireEvent.change(screen.getByLabelText('院區'), { target: { value: '全部院區' } });
-    expect(screen.getByText('新增療程總數').closest('.stat')?.querySelector('strong')?.textContent).toBe('3');
+    expect(within(overviewCards).getByText('新增療程總數').closest('.stat')?.querySelector('strong')?.textContent).toBe('3');
+    expect(newCourseCount('依院區執行完成率', '竹北')).toBe('2');
+    expect(newCourseCount('依療程來源執行完成率', '急診')).toBe('2');
   });
 
   it('accumulates separate selections and analyzes only after clicking the button', async () => {

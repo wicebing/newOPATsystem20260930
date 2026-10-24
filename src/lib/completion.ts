@@ -171,9 +171,11 @@ export function dailyComparison(analysis: Analysis, report: CompletionReport, in
   return [...months.values()];
 }
 
-export function summarizeCompletion(report: CompletionReport, month = 'all', campus = '全部院區'): CompletionSummary {
-  const days = report.days.filter(day => (month === 'all' || day.date.startsWith(month)) && (campus === '全部院區' || day.campus === campus));
+export function summarizeCompletion(report: CompletionReport, month = 'all', campus = '全部院區', courseIds?: ReadonlySet<string>): CompletionSummary {
+  const inScope = (courseId: string) => !courseIds || courseIds.has(courseId);
+  const days = report.days.filter(day => inScope(day.courseId) && (month === 'all' || day.date.startsWith(month)) && (campus === '全部院區' || day.campus === campus));
   const courses = report.courses.filter(course =>
+    inScope(course.courseId) &&
     (month === 'all' || course.lastScheduledDate.startsWith(month) || (!course.lastScheduledDate && course.openingMonth === month)) &&
     (campus === '全部院區' || course.campus === campus));
   const expected = days.reduce((sum, day) => sum + day.expected, 0);

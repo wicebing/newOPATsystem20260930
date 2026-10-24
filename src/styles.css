@@ -141,3 +141,6 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 @media(max-width:1200px){.brand-copy{display:none}}
 @media(max-width:900px){.mobile-brand{gap:8px}.mobile-brand .hospital-logo{width:104px;height:60px}.mobile-brand span{font-size:18px;font-weight:800}}
 @media(max-width:530px){.mobile-brand span{display:none}}
+.completion-breakdown+.completion-breakdown{margin-top:24px}
+.completion-breakdown h3{font-size:16px;color:#284767;margin:0 0 10px;font-weight:800}
+.completion-table{min-width:940px}

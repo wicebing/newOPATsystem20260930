@@ -15,7 +15,7 @@ import {
 } from './lib/opat';
 import type { Analysis, Campus, DataIssue } from './lib/opat';
 import { buildCompletion, dailyComparison, summarizeCompletion } from './lib/completion';
-import type { DailyComparison } from './lib/completion';
+import type { CompletionSummary, DailyComparison } from './lib/completion';
 import { executorKey, groupExecutors } from './lib/staff';
 import { executionTrend, hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weeklyOrders } from './lib/analytics';
 import type { HourlyRow, WeeklyRow } from './lib/analytics';
@@ -54,6 +54,21 @@ function Section({ title, detail, action, children, className = '' }: { title: s
     <div className="section-heading"><div><h2>{title}</h2>{detail && <p>{detail}</p>}</div>{action}</div>
     {children}
   </section>;
+}
+
+function CompletionBreakdownTable({ dimension, rows }: { dimension: '院區' | '療程來源'; rows: (CompletionSummary & { name: string; newCourses: number })[] }) {
+  return <div className="completion-breakdown">
+    <h3>依{dimension}</h3>
+    <div className="table-scroll"><table className="completion-table" aria-label={`依${dimension}執行完成率`}>
+      <thead><tr><th>{dimension === '療程來源' ? '來源' : dimension}</th><th className="numeric">本期新增療程</th><th className="numeric">預定施打</th><th className="numeric">已完成</th><th className="numeric">未完成</th><th>施打完成率</th><th className="numeric">到期療程</th><th className="numeric">完成療程</th><th>療程完成率</th></tr></thead>
+      <tbody>{rows.map(row => <tr key={row.name}>
+        <td className="emph">{row.name}</td><td className="numeric">{number(row.newCourses)}</td><td className="numeric">{number(row.expected)}</td><td className="numeric">{number(row.executed)}</td><td className="numeric">{number(row.missed)}</td>
+        <td><div className="rate-cell"><strong>{percentage(row.doseRate)}</strong><meter min="0" max="1" value={row.doseRate || 0} aria-label={`${row.name}施打完成率`} /></div></td>
+        <td className="numeric">{number(row.dueCourses)}</td><td className="numeric">{number(row.completedCourses)}</td>
+        <td><div className="rate-cell"><strong>{percentage(row.courseRate)}</strong><meter min="0" max="1" value={row.courseRate || 0} aria-label={`${row.name}療程完成率`} /></div></td>
+      </tr>)}</tbody>
+    </table></div>
+  </div>;
 }
 
 function Chart({ children, empty = false }: { children: ReactNode; empty?: boolean }) {
@@ -250,7 +265,11 @@ export default function App() {
   ) || [], [data, month, campus, includedCodes]);
   const completion = useMemo(() => data ? buildCompletion(data, includedCodes, data.snapshotDate) : null, [data, includedCodes]);
   const completionSummary = useMemo(() => completion ? summarizeCompletion(completion, month, campus) : null, [completion, month, campus]);
-  const completionByCampus = useMemo(() => completion ? CAMPUSES.map(name => ({ name, ...summarizeCompletion(completion, month, name) })) : [], [completion, month]);
+  const completionByCampus = useMemo(() => data && completion ? CAMPUSES.map(name => ({
+    name,
+    newCourses: data.courses.filter(course => course.campus === name && (month === 'all' || course.openingMonth === month)).length,
+    ...summarizeCompletion(completion, month, name),
+  })) : [], [data, completion, month]);
   const progressByCourse = useMemo(() => new Map(completion?.courses.map(item => [item.courseId, item]) || []), [completion]);
   const completionByDrug = useMemo(() => {
     const groups = new Map<string, { name: string; expected: number; executed: number }>();
@@ -266,16 +285,16 @@ export default function App() {
   const weekly = useMemo(() => data ? weeklyOrders(data, includedCodes, month) : { courses: [], doses: [] }, [data, includedCodes, month]);
   const weeklyCampuses = CAMPUSES.filter(name => campus === '全部院區' || name === campus);
   const campusComparison = useMemo(() => data && completion ? CAMPUSES.map(name => ({ name, values: dailyComparison(data, completion, includedCodes, month, name) })) : [], [data, completion, includedCodes, month]);
-  const completionBySource = useMemo(() => {
-    const courseById = new Map(data?.courses.map(course => [course.id, course]) || []);
-    return ['門診', '住院', '急診'].map(name => {
-      const due = completion?.courses.filter(progress => courseById.get(progress.courseId)?.source === name &&
-        (campus === '全部院區' || progress.campus === campus) &&
-        (month === 'all' || progress.lastScheduledDate.startsWith(month)) &&
-        (progress.status === '完成' || progress.status === '未完成')) || [];
-      return { name, due: due.length, completed: due.filter(progress => progress.status === '完成').length };
-    });
-  }, [data, completion, month, campus]);
+  const completionBySource = useMemo(() => data && completion ? ['門診', '住院', '急診'].map(name => {
+    const sourceCourses = data.courses.filter(course => course.source === name);
+    const courseIds = new Set(sourceCourses.map(course => course.id));
+    return {
+      name,
+      newCourses: sourceCourses.filter(course => (month === 'all' || course.openingMonth === month) &&
+        (campus === '全部院區' || course.campus === campus)).length,
+      ...summarizeCompletion(completion, month, campus, courseIds),
+    };
+  }) : [], [data, completion, month, campus]);
   const eventCourseIds = useMemo(() => new Set(events.map(event => event.courseId)), [events]);
   const courseExecCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -432,14 +451,12 @@ export default function App() {
               {statLine('未完成施打', number(completionSummary?.missed || 0), COLORS[1], AlertTriangle)}
               {statLine('到期療程完成率', percentage(completionSummary?.courseRate ?? null), COLORS[4], ShieldCheck)}
             </div>
-            <Section title="執行完成率" detail={`依檔名下載日 ${formatDate(data.snapshotDate)} 判定；僅統計截至 ${completion?.asOf || '—'} 的排程，中斷或轉診及資料不足者不列入分母。`}>
-              <div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">預定施打</th><th className="numeric">已完成</th><th className="numeric">未完成</th><th>施打完成率</th><th className="numeric">到期療程</th><th className="numeric">完成療程</th><th>療程完成率</th></tr></thead><tbody>{completionByCampus.filter(row => campus === '全部院區' || row.name === campus).map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.expected)}</td><td className="numeric">{number(row.executed)}</td><td className="numeric">{number(row.missed)}</td><td><div className="rate-cell"><strong>{percentage(row.doseRate)}</strong><meter min="0" max="1" value={row.doseRate || 0} aria-label={`${row.name}施打完成率`} /></div></td><td className="numeric">{number(row.dueCourses)}</td><td className="numeric">{number(row.completedCourses)}</td><td><div className="rate-cell"><strong>{percentage(row.courseRate)}</strong><meter min="0" max="1" value={row.courseRate || 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div>
+            <Section title="執行完成率" detail={`新增療程依開案月；施打依預定日、到期療程依最後預定日歸月。資料快照 ${formatDate(data.snapshotDate)}，僅統計截至 ${completion?.asOf || '—'} 的排程。`}>
+              <CompletionBreakdownTable dimension="院區" rows={completionByCampus.filter(row => campus === '全部院區' || row.name === campus)} />
+              <CompletionBreakdownTable dimension="療程來源" rows={completionBySource} />
               {(completionSummary?.interruptedCourses || completionSummary?.unknownCourses) ? <p className="method-note">另有中斷／轉診 {number(completionSummary?.interruptedCourses || 0)} 療程、排程資料不足 {number(completionSummary?.unknownCourses || 0)} 療程，未列入到期療程完成率。</p> : null}
             </Section>
-            <div className="two-column wide-left">
-              <Section title={month === 'all' ? '每月預定與實際施打' : '每日預定與實際施打'} detail="單日單次醫令依預定日歸屬；截至資料快照前一天"><ComparisonChart values={comparison} /><p className="method-note">未對應排程：有施打明細，但同療程、同藥品、同歸屬日找不到可評估的預定施打；不代表一定多打。原始執行時間仍用於 08:00 績效切月。</p></Section>
-              <Section title="療程來源完成率" detail="依最後預定日期歸月；不含中斷、轉診與資料不足"><div className="table-scroll"><table><thead><tr><th>來源</th><th className="numeric">到期</th><th className="numeric">完成</th><th className="numeric">未完成</th><th>完成率</th></tr></thead><tbody>{completionBySource.map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.due)}</td><td className="numeric">{number(row.completed)}</td><td className="numeric">{number(row.due - row.completed)}</td><td><div className="rate-cell"><strong>{percentage(row.due ? row.completed / row.due : null)}</strong><meter min="0" max="1" value={row.due ? row.completed / row.due : 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div></Section>
-            </div>
+            <Section title={month === 'all' ? '每月預定與實際施打' : '每日預定與實際施打'} detail="單日單次醫令依預定日歸屬；截至資料快照前一天"><ComparisonChart values={comparison} /><p className="method-note">未對應排程：有施打明細，但同療程、同藥品、同歸屬日找不到可評估的預定施打；不代表一定多打。原始執行時間仍用於 08:00 績效切月。</p></Section>
             {campus === '全部院區' && <Section title="各院區預定與實際施打" detail="三院區各自呈現，預定與實際可直接比較"><div className="campus-comparisons">{campusComparison.map(item => <div key={item.name} className="campus-comparison"><h3>{item.name}</h3><ComparisonChart values={item.values} /></div>)}</div></Section>}
             <div className="two-column wide-left trend-row">
               <Section title={month === 'all' ? '每月執行趨勢' : '每日執行趨勢'} detail="每日 08:00 至次日 08:00 歸屬同一天，與績效月份切分一致">

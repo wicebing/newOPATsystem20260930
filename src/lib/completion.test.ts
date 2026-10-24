@@ -18,6 +18,31 @@ const included = new Set(['SIN1AB20']);
 const today = new Date(2026, 6, 25);
 
 describe('scheduled injection completion', () => {
+  it('splits completion by treatment source without treating cross-month doses as new courses', () => {
+    const data = analyze([{ name: '1150905_OPAT個案資料g.xlsx', rows: [
+      row({ 確認日期: '20260831', 開始日: '20260901', 結束日: '20260901', 執行次數明細: '2026/09/01 09:00' }),
+      row({ 帳號: '26T70000002', 病歷號: 'G000002', 院區: '竹北', 診療行為: '住院轉OPAT',
+        確認日期: '20260902', 開始日: '20260902', 結束日: '20260902', 執行次數明細: '2026/09/02 09:00' }),
+      row({ 帳號: '26T70000003', 病歷號: 'G000003', 院區: '竹北', 診療行為: '回院注射藥物療程(OPAT)-Cellulitis',
+        確認日期: '20260903', 開始日: '20260903', 結束日: '20260903', 執行次數: 0, 執行次數明細: '' }),
+    ] }]);
+    const report = buildCompletion(data, included, new Date(2026, 8, 5));
+    const bySource = ['門診', '住院', '急診'].map(source => {
+      const ids = new Set(data.courses.filter(course => course.source === source).map(course => course.id));
+      return { source, newCourses: data.courses.filter(course => ids.has(course.id) && course.openingMonth === '2026-09').length,
+        ...summarizeCompletion(report, '2026-09', '全部院區', ids) };
+    });
+    expect(bySource).toMatchObject([
+      { source: '門診', newCourses: 0, expected: 1, executed: 1, dueCourses: 1, completedCourses: 1 },
+      { source: '住院', newCourses: 1, expected: 1, executed: 1, dueCourses: 1, completedCourses: 1 },
+      { source: '急診', newCourses: 1, expected: 1, executed: 0, dueCourses: 1, completedCourses: 0 },
+    ]);
+    const overall = summarizeCompletion(report, '2026-09');
+    expect(bySource.reduce((sum, row) => sum + row.expected, 0)).toBe(overall.expected);
+    expect(bySource.reduce((sum, row) => sum + row.executed, 0)).toBe(overall.executed);
+    expect(summarizeCompletion(report, '2026-09', '竹東', new Set(data.courses.filter(course => course.source === '急診').map(course => course.id))).expected).toBe(0);
+  });
+
   it('counts due planned doses and distinguishes partial from completed courses', () => {
     const data = analyze([{ name: 'sample-g.xlsx', rows: [row()] }]);
     const report = buildCompletion(data, included, today);
