@@ -94,9 +94,9 @@ export function buildCompletion(analysis: Analysis, includedCodes: Set<string>, 
   });
 
   const actual = new Map<string, number>();
-  analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes))
+  analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && event.date <= asOf)
     .forEach(event => {
-      const key = dayKey(event.courseId, event.drugCode, event.date);
+      const key = dayKey(event.courseId, event.drugCode, event.attributedDate);
       actual.set(key, (actual.get(key) || 0) + 1);
     });
   scheduled.forEach((day, key) => { day.executed = Math.min(day.expected, actual.get(key) || 0); });
@@ -137,8 +137,11 @@ export function dailyComparison(analysis: Analysis, report: CompletionReport, in
   report.days.filter(day => (month === 'all' || day.date.startsWith(month)) && (campus === '全部院區' || day.campus === campus))
     .forEach(day => { dayFor(day.date).預定 += day.expected; dayFor(day.date).完成 += day.executed; });
   analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && event.date <= report.asOf &&
-    (month === 'all' || event.date.startsWith(month)) && (campus === '全部院區' || event.campus === campus))
-    .forEach(event => { dayFor(event.date).實際 += 1; });
+    (campus === '全部院區' || event.campus === campus))
+    .forEach(event => {
+      const date = event.attributedDate <= report.asOf ? event.attributedDate : event.date;
+      if (month === 'all' || date.startsWith(month)) dayFor(date).實際 += 1;
+    });
   const compared = [...days.values()].sort((a, b) => a.key.localeCompare(b.key)).map(item => ({
     ...item, 未完成: Math.max(0, item.預定 - item.完成),
     未對應排程: Math.max(0, item.實際 - item.完成),

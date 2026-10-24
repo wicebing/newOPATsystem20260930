@@ -50,7 +50,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
   const selectedEvents = analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && (month === 'all' || event.month === month) && (campus === '全部院區' || event.campus === campus));
   const executions = selectedEvents.map(event => ({
     院區: event.campus, 帳號: event.account, 病歷號: event.chartNo, 執行人員代碼: event.executorId, 執行人員: event.executorName,
-    執行時間: formatDate(event.time, true), 績效月份: event.month,
+    執行時間: formatDate(event.time, true), 施打歸屬日: event.attributedDate, 績效月份: event.month,
     科別: event.department, 看診醫師: event.doctor, 診療行為: event.treatment,
     藥品八碼: event.drugCode, 組合商品名: event.drugName, 頻率: event.frequency,
     來源檔案: recordById.get(event.rowId)?.file || '',
@@ -104,10 +104,17 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     日期: day.date, 藥品八碼: day.drugCode, 組合商品名: day.drugName,
     預定次數: day.expected, 實際次數: day.executed, 未完成次數: day.expected - day.executed,
   }));
-  const issues = analysis.issues.filter(issue => campus === '全部院區' || issue.campus === campus).map(issue => ({
-    院區: issue.campus, 帳號: issue.account, 類型: issue.code,
-    說明: issue.message, 原始列: issue.rowId,
-  }));
+  const issues = analysis.issues.filter(issue => {
+    const row = recordById.get(issue.rowId);
+    return (campus === '全部院區' || issue.campus === campus) &&
+      (month === 'all' || row?.times.some(time => reportingMonth(time) === month) ||
+        row?.confirmDate && formatDate(row.confirmDate).startsWith(month) ||
+        row?.startDate && formatDate(row.startDate).startsWith(month));
+  }).map(issue => {
+    const source = recordById.get(issue.rowId);
+    return { 院區: issue.campus, 帳號: issue.account, 類型: issue.code,
+      說明: issue.message, 來源檔案: source?.file || '', 來源列號: source?.rowNumber || '' };
+  });
   const duplicateRows = analysis.records.filter(row => (row.duplicateOf || row.possibleDuplicateOf) &&
     (campus === '全部院區' || row.campus === campus) &&
     (month === 'all' || row.times.some(time => reportingMonth(time) === month) ||
@@ -146,7 +153,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
   append('排程對照', scheduleRows, ['院區', '病歷號', '日期', '預定次數', '實際次數']);
   append('Step1清理資料', legacyCleaned, Object.keys(analysis.records[0]?.raw || { 帳號: '', 病歷號: '', 院區: '' }));
   append('重複醫令核對', duplicateRows, ['判定', '差異欄位', '院區', '帳號', '執行人員明細', '藥品八碼', '執行次數明細', '對照執行次數明細', '來源檔案', '來源列號', '對照檔案', '對照列號']);
-  append('資料檢核', issues, ['院區', '帳號', '類型', '說明', '原始列']);
+  append('資料檢核', issues, ['院區', '帳號', '類型', '說明', '來源檔案', '來源列號']);
   return workbook;
 }
 

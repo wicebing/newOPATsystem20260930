@@ -63,6 +63,7 @@ export interface Execution {
   time: Date;
   month: string;
   date: string;
+  attributedDate: string;
   reportingDate: string;
 }
 
@@ -195,7 +196,7 @@ export function classifyDrug(code: string, name: string): DrugKind {
   const normalizedCode = code.toUpperCase().replace(/\s+/g, '');
   const normalizedName = name.toLowerCase();
   if (ANTIBIOTIC_CODES.has(normalizedCode)) return 'injectable-antibiotic';
-  if (normalizedCode.startsWith('SAL') || /saline|sodium chloride|\bnacl\b|\bd5w\b|^(?:\d+(?:\.\d+)?%?\s*)?dextrose\b|sterile water|water for injection|稀釋液|稀釋用|注射用水|氯化鈉|葡萄糖液|diluent/.test(normalizedName)) return 'diluent';
+  if (normalizedCode.startsWith('SAL') || normalizedCode === 'TAI1FA26' || /saline|sodium chloride|\bnacl\b|\bd5w\b|^(?:\d+(?:\.\d+)?%?\s*)?dextrose\b|sterile water|water for injection|\btaita no\.?\s*4\b|稀釋液|稀釋用|注射用水|氯化鈉|葡萄糖液|diluent/.test(normalizedName)) return 'diluent';
   if (/\b(tab|tablet|cap|capsule|oral|cream|oint|supp|pack|insulin|toujeo|solostar|needle|syringe|set)\b|口服|軟膏|針具|針筒|注射器/.test(normalizedName) || /^[A-Z ]{2,4}[245789]/.test(normalizedCode)) return 'other';
   return /\b(inj|injection|injectable|vial|amp|ampoule|intravenous|iv|infusion|bag)\b|針/.test(normalizedName) ? 'review' : 'other';
 }
@@ -264,10 +265,16 @@ function scheduledDayDistance(row: RecordRow): number {
   return Math.abs(actual - scheduled);
 }
 
+function singleDoseScheduledDate(row: RecordRow): string | null {
+  if (!row.startDate || !row.endDate || row.executionCount !== 1 || row.times.length !== 1) return null;
+  const start = formatDate(row.startDate);
+  return start === formatDate(row.endDate) ? start : null;
+}
+
 function markDuplicateOrders(records: RecordRow[], issues: DataIssue[]): void {
   const groups = new Map<string, RecordRow[]>();
   records.forEach(row => {
-    if (!row.account || !row.chartNo) return;
+    if (!row.account || !row.chartNo || (row.kind !== 'injectable-antibiotic' && row.kind !== 'review')) return;
     const key = orderIdentity(row);
     const group = groups.get(key) || [];
     group.push(row);
@@ -364,17 +371,20 @@ export function analyze(files: SourceFile[]): Analysis {
       kind: classifyDrug(value(raw['藥品八碼']), value(raw['組合商品名'])),
       courseId: '',
     };
-    if (!row.account || !row.chartNo) addIssue(issues, row, 'missing-id', '缺少帳號或病歷號，請核對來源');
-    if (row.campus === '未判定') addIssue(issues, row, 'campus', '院區無法判定，未納入院區績效');
+    if ((!row.account || !row.chartNo) && (row.kind === 'injectable-antibiotic' || row.kind === 'review' || row.feeCount > 0)) addIssue(issues, row, 'missing-id', '缺少帳號或病歷號，請核對來源');
+    if (row.campus === '未判定' && (row.kind === 'injectable-antibiotic' || row.kind === 'review' || row.feeCount > 0)) addIssue(issues, row, 'campus', '院區無法判定，未納入院區績效');
     if (row.kind === 'review' && (row.executionCount > 0 || row.times.length > 0)) addIssue(issues, row, 'drug-review', '藥品種類待確認，暫不計入護理與藥劑');
-    if (detail && times.length !== timeParts.length) addIssue(issues, row, 'invalid-time', '執行明細有無法解析的時間');
-    if (timeParts.length && executorParts.length !== timeParts.length) addIssue(issues, row, 'executor-mismatch', `執行時間 ${timeParts.length} 筆，人員明細 ${executorParts.length} 筆；無法完整對應執行人員`);
-    if (row.executionCount !== times.length && (row.executionCount > 0 || times.length > 0)) addIssue(issues, row, 'count-mismatch', `執行次數 ${row.executionCount}，明細時間 ${times.length} 筆`);
-    if (row.refund !== 0 && times.length > 0) addIssue(issues, row, 'refund-execution', '退量非零但有執行明細，已依明細保留施打', 'warning');
+    if (row.kind === 'injectable-antibiotic' || row.kind === 'review') {
+      if (detail && times.length !== timeParts.length) addIssue(issues, row, 'invalid-time', '執行明細有無法解析的時間');
+      if (timeParts.length && executorParts.length !== timeParts.length) addIssue(issues, row, 'executor-mismatch', `執行時間 ${timeParts.length} 筆，人員明細 ${executorParts.length} 筆；無法完整對應執行人員`);
+      if (row.executionCount !== times.length && (row.executionCount > 0 || times.length > 0)) addIssue(issues, row, 'count-mismatch', `執行次數 ${row.executionCount}，明細時間 ${times.length} 筆`);
+      if (row.refund !== 0 && times.length > 0) addIssue(issues, row, 'refund-execution', '退量非零但有執行明細，已依明細保留施打', 'warning');
+    }
     records.push(row);
   }));
 
   markDuplicateOrders(records, issues);
+  const recordById = new Map(records.map(row => [row.id, row]));
 
   const accountKeys = [...new Set(records.map(row => `${row.campus}|${row.account}`))];
   const parent = new Map(accountKeys.map(key => [key, key]));
@@ -412,6 +422,7 @@ export function analyze(files: SourceFile[]): Analysis {
   records.filter(row => !row.duplicateOf && (row.kind === 'injectable-antibiotic' || row.kind === 'review')).forEach(row => row.times.forEach((time, index) => {
     const key = `${row.courseId}|${row.drugCode}|${time.getTime()}`;
     const prior = executionMap.get(key);
+    const attributedDate = singleDoseScheduledDate(row) || formatDate(time);
     if (prior) {
       const currentExecutor = row.executors[index];
       const priorPerson = prior.executorId || prior.executorName;
@@ -419,8 +430,14 @@ export function analyze(files: SourceFile[]): Analysis {
       if (priorPerson && currentPerson && priorPerson !== currentPerson) {
         addIssue(issues, row, 'executor-conflict', `重複施打時間 ${formatDate(time, true)} 的執行人員不一致，請人工核對`);
       }
-      addIssue(issues, row, 'duplicate', `重複執行時間 ${formatDate(time, true)}，已排除重複計數`);
+      const matched = recordById.get(prior.rowId)!;
+      const differentScheduledDays = attributedDate !== prior.attributedDate;
+      const note = differentScheduledDays ? `；本列歸屬 ${attributedDate}、對照列歸屬 ${prior.attributedDate}，請核對是否誤押日期` : '';
+      addIssue(issues, row, 'duplicate', `與 ${matched.file} #${matched.rowNumber} 的 ${row.drugName} 執行時間同為 ${formatDate(time, true)}；已排除一次重複計數${note}`, differentScheduledDays ? 'review' : 'warning');
       return;
+    }
+    if (attributedDate !== formatDate(time)) {
+      addIssue(issues, row, 'execution-date', `單日醫令預定 ${attributedDate}，執行明細記為 ${formatDate(time)}；施打日歸屬採預定日，績效月份仍依原始時間，請核對`);
     }
     executionMap.set(key, {
       id: key, rowId: row.id, courseId: row.courseId, campus: row.campus,
@@ -428,14 +445,14 @@ export function analyze(files: SourceFile[]): Analysis {
       drugName: row.drugName, department: row.department, doctor: row.doctor,
       executorId: row.executors[index]?.id || '', executorName: row.executors[index]?.name || '',
       treatment: row.treatment, frequency: row.frequency, kind: row.kind,
-      time, month: reportingMonth(time), date: formatDate(time), reportingDate: reportingDate(time),
+      time, month: reportingMonth(time), date: formatDate(time), attributedDate, reportingDate: reportingDate(time),
     });
   }));
   const uniqueExecutions = [...executionMap.values()].sort((a, b) => a.time.getTime() - b.time.getTime());
 
   const dayGroups = new Map<string, Execution[]>();
   uniqueExecutions.filter(event => event.kind === 'injectable-antibiotic' || event.kind === 'review').forEach(event => {
-    const key = `${event.courseId}|${event.drugCode}|${event.date}`;
+    const key = `${event.courseId}|${event.drugCode}|${event.attributedDate}`;
     dayGroups.set(key, [...(dayGroups.get(key) || []), event]);
   });
   const excessEvents = new Set<string>();
@@ -444,8 +461,8 @@ export function analyze(files: SourceFile[]): Analysis {
     if (expected !== null && events.length > expected) {
       events.slice(expected).forEach(event => {
         excessEvents.add(event.id);
-        const row = records.find(item => item.id === event.rowId)!;
-        addIssue(issues, row, 'frequency', `${event.date} ${event.frequency} 超過每日 ${expected} 次，該次已排除計分`);
+        const row = recordById.get(event.rowId)!;
+        addIssue(issues, row, 'frequency', `${event.attributedDate} ${event.frequency} 超過每日 ${expected} 次，該次已排除計分`);
       });
     }
   });
@@ -466,17 +483,21 @@ export function analyze(files: SourceFile[]): Analysis {
   });
 
   const courseRows = new Map<string, RecordRow[]>();
-  records.forEach(row => courseRows.set(row.courseId, [...(courseRows.get(row.courseId) || []), row]));
+  records.filter(row => row.kind === 'injectable-antibiotic' || row.kind === 'review' || row.feeCount > 0)
+    .forEach(row => courseRows.set(row.courseId, [...(courseRows.get(row.courseId) || []), row]));
   const courses: Course[] = [...courseRows.entries()].map(([id, rows]) => {
-    const dates = rows.map(firstDate).filter((date): date is Date => date !== null).sort((a, b) => a.getTime() - b.getTime());
-    const scheduledStarts = rows.map(row => row.startDate).filter((date): date is Date => date !== null).sort((a, b) => a.getTime() - b.getTime());
-    const scheduledEnds = rows.map(row => row.endDate).filter((date): date is Date => date !== null).sort((a, b) => a.getTime() - b.getTime());
+    const medicationRows = rows.filter(row => row.kind === 'injectable-antibiotic' || row.kind === 'review');
+    const scheduleRows = medicationRows.length ? medicationRows : rows;
+    const allRows = records.filter(row => row.courseId === id);
+    const dates = scheduleRows.map(firstDate).filter((date): date is Date => date !== null).sort((a, b) => a.getTime() - b.getTime());
+    const scheduledStarts = scheduleRows.map(row => row.startDate).filter((date): date is Date => date !== null).sort((a, b) => a.getTime() - b.getTime());
+    const scheduledEnds = scheduleRows.map(row => row.endDate).filter((date): date is Date => date !== null).sort((a, b) => a.getTime() - b.getTime());
     const events = executions.filter(event => event.courseId === id && event.kind === 'injectable-antibiotic');
-    const first = rows[0];
-    const treatment = rows.map(row => row.treatment).join(' ');
+    const first = scheduleRows[0];
+    const treatment = allRows.map(row => row.treatment).join(' ');
     return {
       id, campus: first.campus, chartNo: first.chartNo,
-      accounts: [...new Set(rows.map(row => row.account))],
+      accounts: [...new Set(allRows.map(row => row.account))],
       source: treatment.includes('門診轉OPAT') ? '門診' : treatment.includes('住院轉OPAT') ? '住院' : '急診',
       doctor: first.doctor, department: first.department, diagnosis: first.diagnosis,
       openingDate: dates[0] || events[0]?.time || null,
@@ -486,10 +507,10 @@ export function analyze(files: SourceFile[]): Analysis {
       firstExecution: events[0]?.time || null,
       lastExecution: events.at(-1)?.time || null,
       executionCount: events.length,
-      failed: rows.some(row => row.failed.toUpperCase() === 'Y'),
-      transferred: rows.some(row => row.transferEmergency !== null || row.transferHospital !== null),
-      transferEmergency: rows.find(row => row.transferEmergency)?.transferEmergency || null,
-      transferHospital: rows.find(row => row.transferHospital)?.transferHospital || null,
+      failed: allRows.some(row => row.failed.toUpperCase() === 'Y'),
+      transferred: allRows.some(row => row.transferEmergency !== null || row.transferHospital !== null),
+      transferEmergency: allRows.find(row => row.transferEmergency)?.transferEmergency || null,
+      transferHospital: allRows.find(row => row.transferHospital)?.transferHospital || null,
       feeCount: feeClaims.filter(claim => claim.courseId === id).reduce((sum, claim) => sum + claim.count, 0),
     };
   });
@@ -507,7 +528,7 @@ export function analyze(files: SourceFile[]): Analysis {
     ...feeClaims.map(claim => claim.month),
     ...courses.map(course => course.openingMonth),
   ]);
-  records.forEach(row => {
+  records.filter(row => row.kind === 'injectable-antibiotic' || row.kind === 'review').forEach(row => {
     if (!row.startDate || !row.endDate || row.endDate < row.startDate ||
       row.endDate.getTime() - row.startDate.getTime() > 366 * 86400_000) return;
     for (let date = new Date(row.startDate.getFullYear(), row.startDate.getMonth(), 1); date <= row.endDate; date.setMonth(date.getMonth() + 1)) {

@@ -22,7 +22,7 @@ describe('Excel report', () => {
     expect(workbook.SheetNames).toEqual(['績效總表', '完成率', 'Step2原系統格式', '執行人員統計', '施打時段', '醫師開立偏好',
       '施打明細', '療程明細', '排程對照', 'Step1清理資料', '重複醫令核對', '資料檢核']);
     const detail = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['施打明細']);
-    expect(detail[0]).toMatchObject({ 院區: '竹東', 病歷號: 'G000001', 執行人員代碼: 'G00001', 執行人員: '王甲乙' });
+    expect(detail[0]).toMatchObject({ 院區: '竹東', 病歷號: 'G000001', 執行人員代碼: 'G00001', 執行人員: '王甲乙', 施打歸屬日: '2026-07-23' });
     const legacy = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Step1清理資料']);
     expect(legacy[0]).toMatchObject({ 帳號: '26T70000001', 執行人員明細: 'G00001王甲乙' });
     const legacyPerformance = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Step2原系統格式']);
@@ -60,6 +60,8 @@ describe('Excel report', () => {
       .toEqual(['SIN1AB20']);
     expect(XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['重複醫令核對'])[0])
       .toMatchObject({ 判定: '已排除重複列', 開始日: '20260723', 結束日: '20260723', 來源列號: 3, 對照列號: 2 });
+    expect(XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['資料檢核'])[0])
+      .toMatchObject({ 類型: 'duplicate-order', 來源檔案: '1150725_OPAT個案資料g.xlsx', 來源列號: 3 });
     expect(XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Step2原系統格式'])[0])
       .toMatchObject({ nursing: 1, pharmacy: 1 });
   });

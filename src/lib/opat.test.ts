@@ -65,6 +65,22 @@ describe('OPAT calculation', () => {
     expect(classifyDrug('NEW1AA01', 'Infusion set')).toBe('other');
     expect(classifyDrug('NEW1AA01', 'Unspecified product')).toBe('other');
     expect(classifyDrug('SIN1AB20', 'Sintrix in Saline')).toBe('injectable-antibiotic');
+    expect(classifyDrug('TAI1FA26', 'Taita No.4 500 mL /bag')).toBe('diluent');
+  });
+
+  it('keeps diluent rows only as raw and fee evidence, without duplicate or drug-review alerts', () => {
+    const saline = row({ 藥品八碼: 'SAL1FAD0', 組合商品名: '100 Saline inj 0.9% 100 mL /bag',
+      執行次數: 0, 執行次數明細: '', '39029C管理費數量': 1 });
+    const data = analyze([{ name: '1151001_OPAT個案資料H.xlsx', rows: [
+      row(), saline, { ...saline },
+      row({ 藥品八碼: 'TAI1FA26', 組合商品名: 'Taita No.4 500 mL /bag' }),
+    ] }]);
+    expect(data.records.filter(item => item.kind === 'diluent')).toHaveLength(3);
+    expect(data.records.every(item => item.duplicateOf === null)).toBe(true);
+    expect(data.issues.some(issue => issue.code === 'duplicate-order' || issue.code === 'drug-review')).toBe(false);
+    expect(data.executions).toHaveLength(1);
+    expect(performance(data, '2026-07', new Set(['SIN1AB20', 'SAL1FAD0', 'TAI1FA26']))
+      .find(item => item.campus === '竹東')).toMatchObject({ nursing: 1, pharmacy: 1, medicalAffairs: 0 });
   });
 
   it('keeps account-level management-fee evidence on a saline row without counting saline use', () => {
@@ -79,6 +95,27 @@ describe('OPAT calculation', () => {
       .toMatchObject({ nursing: 1, pharmacy: 1, medicalAffairs: 1 });
   });
 
+  it('does not create a course or reporting month from a diluent-only schedule', () => {
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ 藥品八碼: 'SAL1FAD0', 組合商品名: '100 Saline inj 0.9% 100 mL /bag',
+        確認日期: '20260723', 開始日: '20261101', 結束日: '20261102' }),
+    ] }]);
+    expect(data.courses).toHaveLength(0);
+    expect(data.months).not.toContain('2026-11');
+  });
+
+  it('uses antibiotic dates for a mixed course while retaining status on diluent rows', () => {
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ 藥品八碼: 'SAL1FAD0', 組合商品名: '100 Saline inj 0.9% 100 mL /bag',
+        確認日期: '20260601', 開始日: '20260601', 結束日: '20261101', 失敗個案: 'Y' }),
+      row({ 開始日: '20260723', 結束日: '20260723' }),
+    ] }]);
+    expect(data.courses).toHaveLength(1);
+    expect(data.courses[0]).toMatchObject({ openingMonth: '2026-07', failed: true });
+    expect(formatDate(data.courses[0].lastScheduledDate!)).toBe('2026-07-23');
+    expect(data.months).not.toContain('2026-11');
+  });
+
   it('caps QD at one and Q12H at two executions per calendar day', () => {
     const data = analyze([{ name: 'sample-g.xlsx', rows: [
       row({ 執行次數: 2, 執行次數明細: '2026/07/23 09:00, 2026/07/23 17:00' }),
@@ -86,6 +123,40 @@ describe('OPAT calculation', () => {
     ] }]);
     expect(performance(data, '2026-07', new Set(['SIN1AB20'])).find(item => item.campus === '竹東')).toMatchObject({ nursing: 3, pharmacy: 2 });
     expect(data.issues.filter(issue => issue.code === 'frequency')).toHaveLength(2);
+  });
+
+  it.each([
+    ['20260912', '20260913', '2026/09/13 07:51', '2026/09/13 07:47'],
+    ['20260920', '20260922', '2026/09/22 08:55', '2026/09/22 08:05'],
+    ['20260930', '20260929', '2026/09/29 20:37', '2026/09/29 07:20'],
+  ])('does not call distinct scheduled QD doses on %s and %s an extra injection', (firstDay, secondDay, firstTime, secondTime) => {
+    const data = analyze([{ name: '1151001_OPAT個案資料H.xlsx', rows: [
+      row({ 帳號: '26T40000001', 病歷號: 'H000001', 院區: '新竹', 開始日: firstDay, 結束日: firstDay,
+        執行次數明細: firstTime, 執行人員明細: 'H00001甲' }),
+      row({ 帳號: '26T40000001', 病歷號: 'H000001', 院區: '新竹', 開始日: secondDay, 結束日: secondDay,
+        執行次數明細: secondTime, 執行人員明細: 'H00002乙' }),
+    ] }]);
+    expect(data.executions.map(event => event.attributedDate).sort()).toEqual(
+      [firstDay, secondDay].map(day => `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6)}`).sort());
+    expect(data.issues.filter(issue => issue.code === 'frequency')).toHaveLength(0);
+    expect(data.issues.filter(issue => issue.code === 'execution-date')).toHaveLength(1);
+    expect(performance(data, '2026-09', new Set(['SIN1AB20'])).find(item => item.campus === '新竹'))
+      .toMatchObject({ nursing: 2, pharmacy: 2 });
+  });
+
+  it('names the matching source row for an exact-time duplicate across scheduled days', () => {
+    const base = { 帳號: '26T40000001', 病歷號: 'H000001', 院區: '新竹',
+      執行人員明細: 'H00001甲' };
+    const data = analyze([{ name: '1151001_OPAT個案資料H.xlsx', rows: [
+      row({ ...base, 開始日: '20260808', 結束日: '20260808', 執行次數: 2,
+        執行次數明細: '2026/08/08 07:23, 2026/08/09 07:04', 執行人員明細: 'H00002乙, H00003丙' }),
+      row({ ...base, 開始日: '20260810', 結束日: '20260810', 執行次數明細: '2026/08/10 05:57' }),
+      row({ ...base, 開始日: '20260809', 結束日: '20260809', 執行次數明細: '2026/08/10 05:57' }),
+    ] }]);
+    expect(data.executions).toHaveLength(3);
+    expect(data.issues.find(issue => issue.code === 'duplicate' && issue.rowId === '0:4')?.message)
+      .toContain('1151001_OPAT個案資料H.xlsx #3');
+    expect(data.issues.some(issue => issue.code === 'frequency')).toBe(false);
   });
 
   it('does not count the same D1/D2 injection twice when account numbers differ', () => {

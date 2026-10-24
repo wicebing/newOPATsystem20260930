@@ -41,6 +41,19 @@ describe('scheduled injection completion', () => {
     expect(summarizeCompletion(report)).toMatchObject({ expected: 2, executed: 2, doseRate: 1, completedCourses: 1 });
   });
 
+  it('credits distinct single-day orders to their scheduled days when a timestamp is mistyped', () => {
+    const data = analyze([{ name: '1151001_OPAT個案資料H.xlsx', rows: [
+      row({ 開始日: '20260912', 結束日: '20260912', 執行次數明細: '2026/09/13 07:51' }),
+      row({ 開始日: '20260913', 結束日: '20260913', 執行次數明細: '2026/09/13 07:47', 執行人員明細: 'G00002李丙丁' }),
+    ] }]);
+    const report = buildCompletion(data, included, new Date(2026, 8, 15));
+    expect(summarizeCompletion(report)).toMatchObject({ expected: 2, executed: 2, doseRate: 1 });
+    expect(dailyComparison(data, report, included, '2026-09', '竹東')).toEqual([
+      expect.objectContaining({ key: '2026-09-12', 預定: 1, 實際: 1, 完成: 1 }),
+      expect.objectContaining({ key: '2026-09-13', 預定: 1, 實際: 1, 完成: 1 }),
+    ]);
+  });
+
   it('ignores saline schedules and administrations even when its code is selected', () => {
     const data = analyze([{ name: 'sample-g.xlsx', rows: [
       row({}),
