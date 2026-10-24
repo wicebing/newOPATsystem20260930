@@ -119,6 +119,9 @@ describe('Excel import queue', () => {
       { target: { files: [new File(['g'], '1150908_OPAT個案資料g.xlsx')] } });
     fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
     await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
+    const summary = screen.getByRole('heading', { name: '醫令頻率' }).closest('section')!;
+    expect(within(summary).getByText('Q12H')).toBeTruthy();
+    expect(within(summary).getByText('1 筆')).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: '開立分析' })[0]);
     const orderSection = screen.getByRole('heading', { name: '非 QD 醫令明細' }).closest('section')!;
     expect(within(orderSection).getByText('測試醫師丙')).toBeTruthy();

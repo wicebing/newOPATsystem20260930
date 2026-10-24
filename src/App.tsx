@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, LabelList, Legend,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, LabelList, Legend, Line, LineChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
@@ -21,7 +21,7 @@ import { hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrder
 import type { HourlyRow, WeeklyRow } from './lib/analytics';
 
 type View = 'overview' | 'execution' | 'prescribing' | 'staff' | 'performance' | 'cases' | 'audit';
-const COLORS = ['#0b8591', '#e47758', '#4869c6', '#ab813c', '#8164ac', '#58939a'];
+const COLORS = ['#07a884', '#f26750', '#4169eb', '#e3a12d', '#805de0', '#13a4c2'];
 const NAV: { id: View; label: string; icon: LucideIcon }[] = [
   { id: 'overview', label: '總覽', icon: LayoutDashboard },
   { id: 'execution', label: '執行分析', icon: Activity },
@@ -59,6 +59,18 @@ function Chart({ children, empty = false }: { children: ReactNode; empty?: boole
   return <div className="chart">{empty ? <div className="chart-empty">此範圍沒有資料</div> : children}</div>;
 }
 
+function FrequencySummary({ values }: { values: { name: string; value: number }[] }) {
+  const total = values.reduce((sum, item) => sum + item.value, 0);
+  const max = Math.max(1, ...values.map(item => item.value));
+  if (!values.length) return <div className="chart-empty frequency-empty">此範圍沒有醫令資料</div>;
+  return <div className="frequency-summary">{values.map((item, index) =>
+    <div className="frequency-row" key={item.name}>
+      <span className="frequency-name" style={{ color: COLORS[index % COLORS.length] }}>{item.name}</span>
+      <div className="frequency-track" aria-hidden="true"><span style={{ width: `${Math.max(3, item.value / max * 100)}%`, backgroundColor: COLORS[index % COLORS.length] }} /></div>
+      <span className="frequency-amount"><strong>{number(item.value)} 筆</strong><small>{percentage(item.value / total)}</small></span>
+    </div>)}</div>;
+}
+
 function TooltipContent({ active, payload, label }: { active?: boolean; payload?: { name?: string; value?: number; color?: string }[]; label?: string }) {
   if (!active || !payload?.length) return null;
   return <div className="chart-tooltip"><strong>{label}</strong>{payload.map((entry, index) => <span key={index} style={{ color: entry.color }}>{entry.name}　{number(Number(entry.value || 0))}</span>)}</div>;
@@ -94,8 +106,8 @@ function HourlyDistribution({ values, campus, empty }: { values: HourlyRow[]; ca
 
 function ExecutionTrend({ values, campus, empty }: { values: Record<string, string | number>[]; campus: Campus | '全部院區'; empty: boolean }) {
   const campuses = CAMPUSES.filter(name => campus === '全部院區' || campus === name);
-  return <><Chart empty={empty}><ResponsiveContainer width="100%" height="100%"><AreaChart data={values} margin={{ top: 12, right: 14, left: -24, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={25} tick={{ fontSize: 11 }} /><YAxis domain={[0, 'auto']} allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Legend />{campuses.map(name => <Area key={name} dataKey={name} stackId="a" stroke={COLORS[CAMPUSES.indexOf(name)]} fill={COLORS[CAMPUSES.indexOf(name)]} fillOpacity={0.8} />)}</AreaChart></ResponsiveContainer></Chart>
-    {campus === '全部院區' && !empty && <div className="campus-trends">{CAMPUSES.map(name => <div className="campus-trend" key={name}><h3>{name}</h3><div className="campus-trend-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={values} margin={{ top: 6, right: 8, left: -25, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={20} tick={{ fontSize: 10 }} /><YAxis domain={[0, 'auto']} allowDecimals={false} tick={{ fontSize: 10 }} /><Tooltip content={<TooltipContent />} /><Area dataKey={name} stroke={COLORS[CAMPUSES.indexOf(name)]} fill={COLORS[CAMPUSES.indexOf(name)]} fillOpacity={0.45} /></AreaChart></ResponsiveContainer></div></div>)}</div>}
+  return <><Chart empty={empty}><ResponsiveContainer width="100%" height="100%"><AreaChart data={values} margin={{ top: 12, right: 14, left: -24, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={25} tick={{ fontSize: 11 }} /><YAxis domain={[0, 'auto']} allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Legend />{campuses.map(name => <Area key={name} type="monotone" dataKey={name} stackId="a" stroke={COLORS[CAMPUSES.indexOf(name)]} strokeWidth={2.5} fill={COLORS[CAMPUSES.indexOf(name)]} fillOpacity={0.23} />)}</AreaChart></ResponsiveContainer></Chart>
+    {campus === '全部院區' && !empty && <div className="campus-trends">{CAMPUSES.map(name => <div className="campus-trend" key={name}><h3>{name}</h3><div className="campus-trend-chart"><ResponsiveContainer width="100%" height="100%"><LineChart data={values} margin={{ top: 9, right: 8, left: -25, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={20} tick={{ fontSize: 10 }} /><YAxis domain={[0, 'auto']} allowDecimals={false} tick={{ fontSize: 10 }} /><Tooltip content={<TooltipContent />} /><Line type="monotone" dataKey={name} stroke={COLORS[CAMPUSES.indexOf(name)]} strokeWidth={2.8} dot={values.length <= 12 ? { r: 3 } : false} activeDot={{ r: 5 }} /></LineChart></ResponsiveContainer></div></div>)}</div>}
   </>;
 }
 
@@ -439,6 +451,9 @@ export default function App() {
               <div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">預定施打</th><th className="numeric">已完成</th><th className="numeric">未完成</th><th>施打完成率</th><th className="numeric">到期療程</th><th className="numeric">完成療程</th><th>療程完成率</th></tr></thead><tbody>{completionByCampus.filter(row => campus === '全部院區' || row.name === campus).map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.expected)}</td><td className="numeric">{number(row.executed)}</td><td className="numeric">{number(row.missed)}</td><td><div className="rate-cell"><strong>{percentage(row.doseRate)}</strong><meter min="0" max="1" value={row.doseRate || 0} aria-label={`${row.name}施打完成率`} /></div></td><td className="numeric">{number(row.dueCourses)}</td><td className="numeric">{number(row.completedCourses)}</td><td><div className="rate-cell"><strong>{percentage(row.courseRate)}</strong><meter min="0" max="1" value={row.courseRate || 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div>
               {(completionSummary?.interruptedCourses || completionSummary?.unknownCourses) ? <p className="method-note">另有中斷／轉診 {number(completionSummary?.interruptedCourses || 0)} 療程、排程資料不足 {number(completionSummary?.unknownCourses || 0)} 療程，未列入到期療程完成率。</p> : null}
             </Section>
+            <Section title="醫令頻率" detail="去重後的注射抗生素醫令筆數；完整圖表與非 QD 逐筆紀錄見開立分析">
+              <FrequencySummary values={byFrequency} />
+            </Section>
             <div className="two-column wide-left">
               <Section title={month === 'all' ? '每月預定與實際施打' : '每日預定與實際施打'} detail="單日單次醫令依預定日歸屬；截至資料快照前一天"><ComparisonChart values={comparison} /><p className="method-note">未對應排程：有施打明細，但同療程、同藥品、同歸屬日找不到可評估的預定施打；不代表一定多打。原始執行時間仍用於 08:00 績效切月。</p></Section>
               <Section title="療程來源完成率" detail="依最後預定日期歸月；不含中斷、轉診與資料不足"><div className="table-scroll"><table><thead><tr><th>來源</th><th className="numeric">到期</th><th className="numeric">完成</th><th className="numeric">未完成</th><th>完成率</th></tr></thead><tbody>{completionBySource.map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.due)}</td><td className="numeric">{number(row.completed)}</td><td className="numeric">{number(row.due - row.completed)}</td><td><div className="rate-cell"><strong>{percentage(row.due ? row.completed / row.due : null)}</strong><meter min="0" max="1" value={row.due ? row.completed / row.due : 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div></Section>
@@ -525,7 +540,7 @@ export default function App() {
               {statLine('醫事點數', number(total.medicalAffairs * POINTS.medicalAffairs, 2), COLORS[2], ClipboardList)}
             </div>
             <Section title="各職類績效" detail="施打與藥品保管按 08:00 切月；無執行時間的管理費依確認日期歸月"><div className="table-scroll"><table className="performance-table"><thead><tr><th>院區</th><th className="numeric">原始施打</th><th className="numeric">排除重複/超頻</th><th className="numeric">護理次數</th><th className="numeric">護理點數</th><th className="numeric">藥劑筆數</th><th className="numeric">藥劑點數</th><th className="numeric">管理費申報</th><th className="numeric">醫事點數</th><th className="numeric">總點數</th></tr></thead><tbody>{visibleReport.map(row => <tr key={row.campus}><td className="emph">{row.campus}</td><td className="numeric">{number(row.rawNursing)}</td><td className="numeric">{number(row.excludedNursing)}</td><td className="numeric">{number(row.nursing)}</td><td className="numeric">{number(row.nursingPoints, 2)}</td><td className="numeric">{number(row.pharmacy)}</td><td className="numeric">{number(row.pharmacyPoints, 2)}</td><td className="numeric">{number(row.medicalAffairs)}</td><td className="numeric">{number(row.medicalAffairsPoints, 3)}</td><td className="numeric emph">{number(row.totalPoints, 3)}</td></tr>)}</tbody><tfoot><tr><td>合計</td><td className="numeric">{number(visibleReport.reduce((sum, row) => sum + row.rawNursing, 0))}</td><td className="numeric">{number(visibleReport.reduce((sum, row) => sum + row.excludedNursing, 0))}</td><td className="numeric">{number(total.nursing)}</td><td className="numeric">{number(total.nursing * POINTS.nursing, 2)}</td><td className="numeric">{number(total.pharmacy)}</td><td className="numeric">{number(total.pharmacy * POINTS.pharmacy, 2)}</td><td className="numeric">{number(total.medicalAffairs)}</td><td className="numeric">{number(total.medicalAffairs * POINTS.medicalAffairs, 3)}</td><td className="numeric">{number(total.totalPoints, 3)}</td></tr></tfoot></table></div><p className="method-note">原始施打保留來源明細供對帳；護理點數採排除相同療程、藥品、時間與超過頻率上限後的有效施打。</p></Section>
-            <div className="two-column wide-left"><Section title="每月點數趨勢"><Chart empty={!monthlyPoints.length}><ResponsiveContainer width="100%" height="100%"><AreaChart data={monthlyPoints} margin={{ top: 12, right: 14, left: -15, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={16} tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend /><Area dataKey="護理" stackId="a" stroke={COLORS[0]} fill={COLORS[0]} /><Area dataKey="藥劑" stackId="a" stroke={COLORS[1]} fill={COLORS[1]} /><Area dataKey="醫事" stackId="a" stroke={COLORS[2]} fill={COLORS[2]} /></AreaChart></ResponsiveContainer></Chart></Section><Section title="計算依據"><div className="rules"><div><Activity size={19} /><strong>護理</strong><span>注射抗生素逐次執行 × 0.1 點</span></div><div><Pill size={19} /><strong>藥劑</strong><span>有執行的去重藥品列 × 0.05 點</span></div><div><ClipboardList size={19} /><strong>醫事</strong><span>非 D1 帳號管理費申報 × 0.025 點</span></div><p>同醫令、同施打明細或同一預定日的 QD 單次施打先去重；跨月醫令在各有執行的月份各計一筆保管。</p></div></Section></div>
+            <div className="two-column wide-left"><Section title="每月點數趨勢"><Chart empty={!monthlyPoints.length}><ResponsiveContainer width="100%" height="100%"><AreaChart data={monthlyPoints} margin={{ top: 12, right: 14, left: -15, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={16} tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend /><Area type="monotone" dataKey="護理" stackId="a" stroke={COLORS[0]} strokeWidth={2.5} fill={COLORS[0]} fillOpacity={0.24} /><Area type="monotone" dataKey="藥劑" stackId="a" stroke={COLORS[1]} strokeWidth={2.5} fill={COLORS[1]} fillOpacity={0.24} /><Area type="monotone" dataKey="醫事" stackId="a" stroke={COLORS[2]} strokeWidth={2.5} fill={COLORS[2]} fillOpacity={0.24} /></AreaChart></ResponsiveContainer></Chart></Section><Section title="計算依據"><div className="rules"><div><Activity size={19} /><strong>護理</strong><span>注射抗生素逐次執行 × 0.1 點</span></div><div><Pill size={19} /><strong>藥劑</strong><span>有執行的去重藥品列 × 0.05 點</span></div><div><ClipboardList size={19} /><strong>醫事</strong><span>非 D1 帳號管理費申報 × 0.025 點</span></div><p>同醫令、同施打明細或同一預定日的 QD 單次施打先去重；跨月醫令在各有執行的月份各計一筆保管。</p></div></Section></div>
           </>}
 
           {view === 'cases' && <>
