@@ -28,6 +28,8 @@ export interface RecordRow {
   status: string;
   failed: string;
   executionCount: number;
+  injectionOnceClaimCount: number;
+  injectionMultipleClaimCount: number;
   feeCount: number;
   refund: number;
   detail: string;
@@ -356,6 +358,8 @@ export function analyze(files: SourceFile[]): Analysis {
       status: value(raw['狀態']),
       failed: value(raw['失敗個案']),
       executionCount: number(raw['執行次數']),
+      injectionOnceClaimCount: number(raw['39027C注射一次數量']),
+      injectionMultipleClaimCount: number(raw['39028C注射二次數量']),
       feeCount: number(raw['39029C管理費數量']),
       refund: number(raw['針劑應退量']),
       detail,
@@ -371,8 +375,8 @@ export function analyze(files: SourceFile[]): Analysis {
       kind: classifyDrug(value(raw['藥品八碼']), value(raw['組合商品名'])),
       courseId: '',
     };
-    if ((!row.account || !row.chartNo) && (row.kind === 'injectable-antibiotic' || row.kind === 'review' || row.feeCount > 0)) addIssue(issues, row, 'missing-id', '缺少帳號或病歷號，請核對來源');
-    if (row.campus === '未判定' && (row.kind === 'injectable-antibiotic' || row.kind === 'review' || row.feeCount > 0)) addIssue(issues, row, 'campus', '院區無法判定，未納入院區績效');
+    if ((!row.account || !row.chartNo) && (row.kind === 'injectable-antibiotic' || row.kind === 'review' || row.injectionOnceClaimCount > 0 || row.injectionMultipleClaimCount > 0 || row.feeCount > 0)) addIssue(issues, row, 'missing-id', '缺少帳號或病歷號，請核對來源');
+    if (row.campus === '未判定' && (row.kind === 'injectable-antibiotic' || row.kind === 'review' || row.injectionOnceClaimCount > 0 || row.injectionMultipleClaimCount > 0 || row.feeCount > 0)) addIssue(issues, row, 'campus', '院區無法判定，未納入院區績效');
     if (row.kind === 'review' && (row.executionCount > 0 || row.times.length > 0)) addIssue(issues, row, 'drug-review', '藥品種類待確認，暫不計入護理與藥劑');
     if (row.kind === 'injectable-antibiotic' || row.kind === 'review') {
       if (detail && times.length !== timeParts.length) addIssue(issues, row, 'invalid-time', '執行明細有無法解析的時間');
@@ -527,6 +531,8 @@ export function analyze(files: SourceFile[]): Analysis {
     ...executions.map(event => event.month),
     ...feeClaims.map(claim => claim.month),
     ...courses.map(course => course.openingMonth),
+    ...records.filter(row => row.injectionOnceClaimCount > 0 || row.injectionMultipleClaimCount > 0 || row.feeCount > 0)
+      .map(row => formatDate(row.visitDate || row.confirmDate || row.startDate).slice(0, 7)),
   ]);
   records.filter(row => row.kind === 'injectable-antibiotic' || row.kind === 'review').forEach(row => {
     if (!row.startDate || !row.endDate || row.endDate < row.startDate ||

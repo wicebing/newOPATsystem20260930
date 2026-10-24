@@ -4,6 +4,7 @@ import { CAMPUSES, formatDate, isSelectedAntibiotic, reportingMonth } from './op
 import { groupExecutors } from './staff';
 import { hourlyByCampus, prescribingMatrix, weeklyOrders } from './analytics';
 import { summarizeCompletion } from './completion';
+import { NHI_UNIT_POINTS, nhiPoints } from './nhi';
 import type { CompletionReport } from './completion';
 
 const REQUIRED = ['帳號', '病歷號', '診療行為', '組合商品名', '執行次數', '執行次數明細', '39029C管理費數量'];
@@ -47,6 +48,20 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     醫事點數: row.medicalAffairsPoints,
     總點數: row.totalPoints,
   }));
+  const selectedNhi = nhiPoints(analysis, month).filter(row => campus === '全部院區' || row.campus === campus);
+  const nhiSummary = [...selectedNhi, {
+    campus: '合計', injectionOnce: selectedNhi.reduce((sum, row) => sum + row.injectionOnce, 0),
+    injectionMultiple: selectedNhi.reduce((sum, row) => sum + row.injectionMultiple, 0),
+    management: selectedNhi.reduce((sum, row) => sum + row.management, 0),
+    injectionOncePoints: selectedNhi.reduce((sum, row) => sum + row.injectionOncePoints, 0),
+    injectionMultiplePoints: selectedNhi.reduce((sum, row) => sum + row.injectionMultiplePoints, 0),
+    managementPoints: selectedNhi.reduce((sum, row) => sum + row.managementPoints, 0),
+    totalPoints: selectedNhi.reduce((sum, row) => sum + row.totalPoints, 0),
+  }].map(row => ({ 月份: month === 'all' ? '全部期間' : month, 院區: row.campus,
+    '39027C數量': row.injectionOnce, '39027C單位點數': NHI_UNIT_POINTS.injectionOnce, '39027C點數': row.injectionOncePoints,
+    '39028C數量': row.injectionMultiple, '39028C單位點數': NHI_UNIT_POINTS.injectionMultiple, '39028C點數': row.injectionMultiplePoints,
+    '39029C數量': row.management, '39029C單位點數': NHI_UNIT_POINTS.management, '39029C點數': row.managementPoints,
+    合計點數: row.totalPoints, 點數性質: '依原檔申報數量估算，非實際核付' }));
   const selectedEvents = analysis.executions.filter(event => isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && (month === 'all' || event.month === month) && (campus === '全部院區' || event.campus === campus));
   const executions = selectedEvents.map(event => ({
     院區: event.campus, 帳號: event.account, 病歷號: event.chartNo, 執行人員代碼: event.executorId, 執行人員: event.executorName,
@@ -156,6 +171,7 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     XLSX.utils.book_append_sheet(workbook, sheet, name);
   };
   append('績效總表', summary, ['月份', '院區', '護理執行次數', '藥劑保管筆數', '管理費申報數']);
+  append('健保申報點數', nhiSummary, ['月份', '院區', '39027C數量', '39028C數量', '39029C數量', '合計點數']);
   append('完成率', completionRows, ['月份', '院區', '預定施打', '已完成施打']);
   append('每週開立量', weeklyRows, ['週起日', '週別', '院區', '新療程', '預定施打次數']);
   append('Step2原系統格式', legacyPerformance, ['campus', 'nursing', 'pharmacy', 'medicalAffairs']);

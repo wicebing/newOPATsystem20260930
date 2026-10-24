@@ -146,9 +146,33 @@ describe('Excel import queue', () => {
     fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
     await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
     expect((screen.getByLabelText('績效月份') as HTMLSelectElement).value).toBe('2026-09');
-    expect(screen.queryByRole('heading', { name: '每週開立新療程' })).toBeNull();
+    expect(screen.getByRole('heading', { name: '每週開立新療程' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: '療程來源' })).toBeNull();
     fireEvent.click(screen.getAllByRole('button', { name: '開立分析' })[0]);
     expect(screen.getByRole('heading', { name: '每週開立新療程' })).toBeTruthy();
+  });
+
+  it('shows claim points and treatment-source share in the overview and performance page', async () => {
+    reader.mockResolvedValueOnce([{ name: '1150908_OPAT個案資料G.xlsx', rows: [{
+      帳號: 'A', 病歷號: 'G001', 院區: '竹東', 診療行為: '門診轉OPAT「D2-D7」',
+      藥品八碼: 'SIN1AB20', 組合商品名: 'Sintrix 500 mg/vial', 頻率: 'QD',
+      帳號看診日: '2026/09/01', 確認日期: '20260901', 開始日: '20260901', 結束日: '20260901',
+      執行次數: 1, 執行次數明細: '2026/09/01 09:00',
+      '39027C注射一次數量': 2, '39029C管理費數量': 1,
+    }] }]);
+    const { container } = render(<App />);
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement,
+      { target: { files: [new File(['g'], '1150908_OPAT個案資料G.xlsx')] } });
+    fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
+    await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
+    expect(screen.getByText('健保申報點數估算').closest('.stat')?.querySelector('strong')?.textContent).toBe('2,562');
+    const sourceRows = screen.getByRole('table', { name: '依療程來源執行完成率' }).querySelectorAll<HTMLTableRowElement>('tbody tr');
+    expect(sourceRows[0].cells[2].textContent).toBe('100.0%');
+    expect(sourceRows[1].cells[2].textContent).toBe('0.0%');
+    fireEvent.click(screen.getAllByRole('button', { name: '績效點數' })[0]);
+    expect(screen.getByRole('heading', { name: '健保申報點數' })).toBeTruthy();
+    expect(container.querySelector('.nhi-table tbody tr:last-child')?.textContent).toContain('2,562');
+    expect(container.querySelector('.nhi-table tfoot')?.textContent).toContain('2,562');
   });
 
   it('shows the prescriber and drug in the non-QD order list', async () => {

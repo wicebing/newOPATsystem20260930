@@ -12,14 +12,14 @@ describe('Excel report', () => {
       藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 1,
       執行次數明細: '2026/07/23 09:00', 執行人員明細: 'G00001王甲乙',
       開始日: '20260723', 結束日: '20260724', 確認日期: '20260723',
-      '39029C管理費數量': 1,
+      '39027C注射一次數量': 2, '39028C注射二次數量': 0, '39029C管理費數量': 1,
     }] }]);
     const included = new Set(['SIN1AB20']);
     const report = performance(analysis, '2026-07', included);
     const completion = buildCompletion(analysis, included, new Date(2026, 6, 25));
     const workbook = createReportWorkbook(analysis, report, '2026-07', '竹東', included, completion);
 
-    expect(workbook.SheetNames).toEqual(['績效總表', '完成率', '每週開立量', 'Step2原系統格式', '執行人員統計', '施打時段', '醫師開立偏好',
+    expect(workbook.SheetNames).toEqual(['績效總表', '健保申報點數', '完成率', '每週開立量', 'Step2原系統格式', '執行人員統計', '施打時段', '醫師開立偏好',
       '施打明細', '療程明細', '排程對照', 'Step1清理資料', '重複醫令核對', '資料檢核']);
     const weekly = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['每週開立量']);
     expect(weekly[0]).toMatchObject({ 週起日: '2026-07-20', 院區: '竹東', 新療程: 1, 預定施打次數: 2 });
@@ -31,6 +31,10 @@ describe('Excel report', () => {
     expect(legacyPerformance[0]).toEqual({ campus: '竹東', nursing: 1, pharmacy: 1, medicalAffairs: 1 });
     const summary = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['績效總表']);
     expect(summary[0]).toMatchObject({ 資料快照日: '2026-07-25', 原始施打明細: 1, 排除重複或超頻: 0 });
+    const nhi = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['健保申報點數']);
+    expect(nhi[0]).toMatchObject({ 院區: '竹東', '39027C數量': 2, '39027C點數': 2062,
+      '39029C數量': 1, '39029C點數': 500, 合計點數: 2562 });
+    expect(nhi.at(-1)).toMatchObject({ 院區: '合計', 合計點數: 2562 });
     const hourly = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['施打時段']);
     expect(hourly[9]).toMatchObject({ 時段: '09:00', 竹東: 1, 合計: 1 });
     const prescribing = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['醫師開立偏好']);

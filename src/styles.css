@@ -133,9 +133,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 @media(max-width:800px){.content{padding:26px 18px 55px}.page-heading h1{font-size:29px}.page-subtitle{font-size:14px}.section-heading h2{font-size:20px}.section-heading p{font-size:14px}.chart{height:310px}.campus-weekly{grid-template-columns:1fr}.weekly-small-chart{height:220px}}
 @media(max-width:530px){.topbar-actions .button.primary{min-height:42px;font-size:14px}.filters label{min-height:61px}.stat{height:130px;padding:14px 12px}.stat-top{font-size:13px}.stat strong{font-size:27px;margin-top:14px}.completion-stats .stat{height:130px}.table-scroll table{font-size:14px}.table-scroll .mono{font-size:13px}.chart{height:295px}.weekly-primary{height:300px}.section-heading{gap:11px}.section-heading h2{font-size:19px}.section-heading p{font-size:14px}}
 @media(max-width:530px){.topbar{padding:0 12px}.topbar-actions{gap:6px}.topbar-actions .export-button{min-width:42px;width:42px;height:42px;padding:0}.export-label{display:none}.filters label{min-width:0}.frequency-summary{padding:7px 12px}.frequency-row{grid-template-columns:58px minmax(0,1fr) 75px;gap:9px}.frequency-name{font-size:14px}.frequency-amount strong{font-size:15px}.frequency-amount small{font-size:12px}}
-.stats-grid.overview-stats{grid-template-columns:repeat(5,minmax(0,1fr))}
-@media(max-width:1200px) and (min-width:801px){.stats-grid.overview-stats{grid-template-columns:repeat(6,minmax(0,1fr))}.overview-stats .stat{grid-column:span 2}.overview-stats .stat:nth-last-child(-n+2){grid-column:span 3}}
-@media(max-width:800px){.stats-grid.overview-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-stats .stat:last-child{grid-column:1/-1}}
+.stats-grid.overview-stats{grid-template-columns:repeat(6,minmax(0,1fr))}.overview-stats .stat:last-child strong{font-size:30px}
+@media(max-width:1200px) and (min-width:801px){.stats-grid.overview-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:800px){.stats-grid.overview-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-stats .stat:last-child strong{font-size:24px}}
 .hospital-logo{display:block;width:142px;height:81px;object-fit:contain;flex:none}
 .brand-copy{min-width:0}
 @media(max-width:1200px){.brand-copy{display:none}}
@@ -144,3 +144,5 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .completion-breakdown+.completion-breakdown{margin-top:24px}
 .completion-breakdown h3{font-size:16px;color:#284767;margin:0 0 10px;font-weight:800}
 .completion-table{min-width:940px}
+.nhi-table{min-width:900px}.nhi-table tfoot{background:#eaf3ff}.nhi-table tfoot td{font-weight:800;color:#194b86}
+.weekly-overview .weekly-primary{border:1px solid #e0e8f1;border-radius:6px;box-shadow:0 3px 14px #24466a08}

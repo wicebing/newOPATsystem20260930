@@ -17,6 +17,8 @@ import type { Analysis, Campus, DataIssue } from './lib/opat';
 import { buildCompletion, dailyComparison, summarizeCompletion } from './lib/completion';
 import type { CompletionSummary, DailyComparison } from './lib/completion';
 import { executorKey, groupExecutors } from './lib/staff';
+import { NHI_UNIT_POINTS, nhiPoints } from './lib/nhi';
+import type { NhiPointsRow } from './lib/nhi';
 import { executionTrend, hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weekdayByCampus, weeklyOrders } from './lib/analytics';
 import type { HourlyRow, WeeklyRow } from './lib/analytics';
 import hospitalLogo from './assets/ntuh_hch.png';
@@ -57,18 +59,28 @@ function Section({ title, detail, action, children, className = '' }: { title: s
 }
 
 function CompletionBreakdownTable({ dimension, rows }: { dimension: '院區' | '療程來源'; rows: (CompletionSummary & { name: string; newCourses: number })[] }) {
+  const totalNewCourses = rows.reduce((sum, row) => sum + row.newCourses, 0);
   return <div className="completion-breakdown">
     <h3>依{dimension}</h3>
     <div className="table-scroll"><table className="completion-table" aria-label={`依${dimension}執行完成率`}>
-      <thead><tr><th>{dimension === '療程來源' ? '來源' : dimension}</th><th className="numeric">本期新增療程</th><th className="numeric">預定施打</th><th className="numeric">已完成</th><th className="numeric">未完成</th><th>施打完成率</th><th className="numeric">到期療程</th><th className="numeric">完成療程</th><th>療程完成率</th></tr></thead>
+      <thead><tr><th>{dimension === '療程來源' ? '來源' : dimension}</th><th className="numeric">本期新增療程</th>{dimension === '療程來源' && <th className="numeric">新增療程占比</th>}<th className="numeric">預定施打</th><th className="numeric">已完成</th><th className="numeric">未完成</th><th>施打完成率</th><th className="numeric">到期療程</th><th className="numeric">完成療程</th><th>療程完成率</th></tr></thead>
       <tbody>{rows.map(row => <tr key={row.name}>
-        <td className="emph">{row.name}</td><td className="numeric">{number(row.newCourses)}</td><td className="numeric">{number(row.expected)}</td><td className="numeric">{number(row.executed)}</td><td className="numeric">{number(row.missed)}</td>
+        <td className="emph">{row.name}</td><td className="numeric">{number(row.newCourses)}</td>{dimension === '療程來源' && <td className="numeric">{percentage(totalNewCourses ? row.newCourses / totalNewCourses : null)}</td>}<td className="numeric">{number(row.expected)}</td><td className="numeric">{number(row.executed)}</td><td className="numeric">{number(row.missed)}</td>
         <td><div className="rate-cell"><strong>{percentage(row.doseRate)}</strong><meter min="0" max="1" value={row.doseRate || 0} aria-label={`${row.name}施打完成率`} /></div></td>
         <td className="numeric">{number(row.dueCourses)}</td><td className="numeric">{number(row.completedCourses)}</td>
         <td><div className="rate-cell"><strong>{percentage(row.courseRate)}</strong><meter min="0" max="1" value={row.courseRate || 0} aria-label={`${row.name}療程完成率`} /></div></td>
       </tr>)}</tbody>
     </table></div>
   </div>;
+}
+
+function NhiPointsTable({ rows }: { rows: NhiPointsRow[] }) {
+  const sum = (key: keyof NhiPointsRow) => rows.reduce((total, row) => total + Number(row[key]), 0);
+  return <div className="table-scroll"><table className="nhi-table">
+    <thead><tr><th>院區</th><th className="numeric">39027C 日數</th><th className="numeric">點數</th><th className="numeric">39028C 日數</th><th className="numeric">點數</th><th className="numeric">39029C 筆數</th><th className="numeric">點數</th><th className="numeric">合計點數</th></tr></thead>
+    <tbody>{rows.map(row => <tr key={row.campus}><td className="emph">{row.campus}</td><td className="numeric">{number(row.injectionOnce)}</td><td className="numeric">{number(row.injectionOncePoints)}</td><td className="numeric">{number(row.injectionMultiple)}</td><td className="numeric">{number(row.injectionMultiplePoints)}</td><td className="numeric">{number(row.management)}</td><td className="numeric">{number(row.managementPoints)}</td><td className="numeric emph">{number(row.totalPoints)}</td></tr>)}</tbody>
+    <tfoot><tr><td>合計</td><td className="numeric">{number(sum('injectionOnce'))}</td><td className="numeric">{number(sum('injectionOncePoints'))}</td><td className="numeric">{number(sum('injectionMultiple'))}</td><td className="numeric">{number(sum('injectionMultiplePoints'))}</td><td className="numeric">{number(sum('management'))}</td><td className="numeric">{number(sum('managementPoints'))}</td><td className="numeric emph">{number(sum('totalPoints'))}</td></tr></tfoot>
+  </table></div>;
 }
 
 function Chart({ children, empty = false }: { children: ReactNode; empty?: boolean }) {
@@ -128,18 +140,18 @@ function ExecutionTrend({ values, campus, empty }: { values: Record<string, stri
   </>;
 }
 
-function WeeklyChart({ values, campus, unit }: { values: WeeklyRow[]; campus: Campus | '全部院區'; unit: string }) {
+function WeeklyChart({ values, campus, unit, compact = false }: { values: WeeklyRow[]; campus: Campus | '全部院區'; unit: string; compact?: boolean }) {
   const campuses = CAMPUSES.filter(name => campus === '全部院區' || name === campus);
   const max = Math.max(1, ...values.flatMap(row => CAMPUSES.map(name => row[name])));
   if (!values.some(row => campuses.some(name => row[name] > 0))) return <div className="chart-empty weekly-empty">此範圍沒有開立資料</div>;
   return <>
-    <div className="weekly-scroll"><div className="weekly-primary" style={{ minWidth: Math.max(350, values.length * (campus === '全部院區' ? 94 : 76)) }}>
+    <div className={`weekly-scroll${compact ? ' weekly-overview' : ''}`}><div className="weekly-primary" style={{ minWidth: Math.max(350, values.length * (campus === '全部院區' ? 94 : 76)) }}>
       <ResponsiveContainer width="100%" height="100%"><BarChart data={values} margin={{ top: 12, right: 12, left: 0, bottom: 4 }} barCategoryGap="27%">
         <CartesianGrid stroke="#e3e9ed" vertical={false} /><XAxis dataKey="name" interval={0} /><YAxis allowDecimals={false} width={42} /><Tooltip content={<TooltipContent />} />
         {campus === '全部院區' && <Legend />}{campuses.map(name => <Bar key={name} dataKey={name} name={name} fill={COLORS[CAMPUSES.indexOf(name)]} maxBarSize={24} radius={[3, 3, 0, 0]} isAnimationActive={false} />)}
       </BarChart></ResponsiveContainer>
     </div></div>
-    {campus === '全部院區' && <div className="campus-weekly">{CAMPUSES.map(name => <div className="campus-week" key={name}>
+    {!compact && campus === '全部院區' && <div className="campus-weekly">{CAMPUSES.map(name => <div className="campus-week" key={name}>
       <h3><span className="campus-key" style={{ background: COLORS[CAMPUSES.indexOf(name)] }} />{name}<span>{number(values.reduce((sum, row) => sum + row[name], 0))} {unit}</span></h3>
       <div className="weekly-scroll"><div className="weekly-small-chart" style={{ minWidth: Math.max(290, values.length * 64) }}>
         <ResponsiveContainer width="100%" height="100%"><BarChart data={values} margin={{ top: 7, right: 5, left: 0, bottom: 1 }} barCategoryGap="31%">
@@ -260,6 +272,9 @@ export default function App() {
     medicalAffairs: sum.medicalAffairs + row.medicalAffairs,
     totalPoints: sum.totalPoints + row.totalPoints,
   }), { nursing: 0, pharmacy: 0, medicalAffairs: 0, totalPoints: 0 });
+  const nhiReport = useMemo(() => data ? nhiPoints(data, month) : [], [data, month]);
+  const visibleNhiReport = nhiReport.filter(row => campus === '全部院區' || row.campus === campus);
+  const totalNhiPoints = visibleNhiReport.reduce((sum, row) => sum + row.totalPoints, 0);
 
   const events = useMemo(() => data?.executions.filter(event =>
     isSelectedAntibiotic(event.drugCode, event.kind, includedCodes) && (month === 'all' || event.month === month) && (campus === '全部院區' || event.campus === campus),
@@ -336,10 +351,6 @@ export default function App() {
 
   const monthlyCampus = useMemo(() => data ? (month === 'all' ? data.months : [month]).flatMap(key => performance(data, key, includedCodes)
     .filter(row => campus === '全部院區' || row.campus === campus).map(row => ({ month: key, ...row }))) : [], [data, month, campus, includedCodes]);
-  const bySource = useMemo(() => ['門診', '住院', '急診'].map(name => {
-    const value = newCases.filter(course => course.source === name).length;
-    return { name, value, label: `${number(value)} · ${percentage(newCases.length ? value / newCases.length : null)}` };
-  }).filter(item => item.value > 0), [newCases]);
   const branchStatus = useMemo(() => CAMPUSES.map(name => {
     const branchCases = cases.filter(course => course.campus === name);
     return {
@@ -449,6 +460,7 @@ export default function App() {
               {statLine('施打完成率', percentage(completionSummary?.doseRate ?? null), COLORS[2], Check)}
               {statLine('未完成施打', number(completionSummary?.missed || 0), COLORS[1], AlertTriangle)}
               {statLine('到期療程完成率', percentage(completionSummary?.courseRate ?? null), COLORS[4], ShieldCheck)}
+              {statLine('健保申報點數估算', number(totalNhiPoints), COLORS[5], Stethoscope)}
             </div>
             <Section title="執行完成率" detail={`新增療程依開案月；施打依預定日、到期療程依最後預定日歸月。資料快照 ${formatDate(data.snapshotDate)}，僅統計截至 ${completion?.asOf || '—'} 的排程。`}>
               <CompletionBreakdownTable dimension="院區" rows={completionByCampus.filter(row => campus === '全部院區' || row.name === campus)} />
@@ -466,7 +478,7 @@ export default function App() {
               </Section>
             </div>
             <div className="two-column">
-              <Section title="療程來源" detail="標示新開療程數及占比；D1 與 D2-D7 合併"><RankedBars values={bySource} axisWidth={75} /></Section>
+              <Section title="每週開立新療程" detail="依開案日歸週；門診 D1 與 D2-D7 合併為一療程"><WeeklyChart values={weekly.courses} campus={campus} unit="療程" compact /></Section>
               <Section title="常用注射抗生素" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} axisWidth={110} /></Section>
             </div>
             <Section title="醫令頻率" detail="去重後的注射抗生素醫令筆數；完整圖表與非 QD 逐筆紀錄見開立分析">
@@ -535,12 +547,17 @@ export default function App() {
           </>}
 
           {view === 'performance' && <>
-            <div className="stats-grid three">
+            <div className="stats-grid">
               {statLine('護理點數', number(total.nursing * POINTS.nursing, 2), COLORS[0], Activity)}
               {statLine('藥劑點數', number(total.pharmacy * POINTS.pharmacy, 2), COLORS[1], Pill)}
               {statLine('醫事點數', number(total.medicalAffairs * POINTS.medicalAffairs, 2), COLORS[2], ClipboardList)}
+              {statLine('健保申報點數估算', number(totalNhiPoints), COLORS[3], Stethoscope)}
             </div>
             <Section title="各職類績效" detail="施打與藥品保管按 08:00 切月；無執行時間的管理費依確認日期歸月"><div className="table-scroll"><table className="performance-table"><thead><tr><th>院區</th><th className="numeric">原始施打</th><th className="numeric">排除重複/超頻</th><th className="numeric">護理次數</th><th className="numeric">護理點數</th><th className="numeric">藥劑筆數</th><th className="numeric">藥劑點數</th><th className="numeric">管理費申報</th><th className="numeric">醫事點數</th><th className="numeric">總點數</th></tr></thead><tbody>{visibleReport.map(row => <tr key={row.campus}><td className="emph">{row.campus}</td><td className="numeric">{number(row.rawNursing)}</td><td className="numeric">{number(row.excludedNursing)}</td><td className="numeric">{number(row.nursing)}</td><td className="numeric">{number(row.nursingPoints, 2)}</td><td className="numeric">{number(row.pharmacy)}</td><td className="numeric">{number(row.pharmacyPoints, 2)}</td><td className="numeric">{number(row.medicalAffairs)}</td><td className="numeric">{number(row.medicalAffairsPoints, 3)}</td><td className="numeric emph">{number(row.totalPoints, 3)}</td></tr>)}</tbody><tfoot><tr><td>合計</td><td className="numeric">{number(visibleReport.reduce((sum, row) => sum + row.rawNursing, 0))}</td><td className="numeric">{number(visibleReport.reduce((sum, row) => sum + row.excludedNursing, 0))}</td><td className="numeric">{number(total.nursing)}</td><td className="numeric">{number(total.nursing * POINTS.nursing, 2)}</td><td className="numeric">{number(total.pharmacy)}</td><td className="numeric">{number(total.pharmacy * POINTS.pharmacy, 2)}</td><td className="numeric">{number(total.medicalAffairs)}</td><td className="numeric">{number(total.medicalAffairs * POINTS.medicalAffairs, 3)}</td><td className="numeric">{number(total.totalPoints, 3)}</td></tr></tfoot></table></div><p className="method-note">原始施打保留來源明細供對帳；護理點數採排除相同療程、藥品、時間與超過頻率上限後的有效施打。</p></Section>
+            <Section title="健保申報點數" detail="依原始 Excel 三項申報數量計算，非實際核付點數">
+              <NhiPointsTable rows={visibleNhiReport} />
+              <p className="method-note">39027C 每日注射一次 × {number(NHI_UNIT_POINTS.injectionOnce)} 點；39028C 每日注射兩次以上 × {number(NHI_UNIT_POINTS.injectionMultiple)} 點；39029C 個案管理 × {number(NHI_UNIT_POINTS.management)} 點。同院區、同帳號、同健保碼只計一次，可辨識檔名日期時以較新檔案為準；39029C 排除門診 D1。月份依帳號看診日，缺少時用確認／開始日，與職類績效的 08:00 執行月份不同。未判定院區另列示；缺帳號無法去重者不計入，請見資料檢核。</p>
+            </Section>
             <div className="two-column wide-left"><Section title="每月點數趨勢"><Chart empty={!monthlyPoints.length}><ResponsiveContainer width="100%" height="100%"><AreaChart data={monthlyPoints} margin={{ top: 12, right: 14, left: -15, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={16} tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} /><Tooltip /><Legend /><Area type="monotone" dataKey="護理" stackId="a" stroke={COLORS[0]} strokeWidth={2.5} fill={COLORS[0]} fillOpacity={0.24} /><Area type="monotone" dataKey="藥劑" stackId="a" stroke={COLORS[1]} strokeWidth={2.5} fill={COLORS[1]} fillOpacity={0.24} /><Area type="monotone" dataKey="醫事" stackId="a" stroke={COLORS[2]} strokeWidth={2.5} fill={COLORS[2]} fillOpacity={0.24} /></AreaChart></ResponsiveContainer></Chart></Section><Section title="計算依據"><div className="rules"><div><Activity size={19} /><strong>護理</strong><span>注射抗生素逐次執行 × 0.1 點</span></div><div><Pill size={19} /><strong>藥劑</strong><span>有執行的去重藥品列 × 0.05 點</span></div><div><ClipboardList size={19} /><strong>醫事</strong><span>非 D1 帳號管理費申報 × 0.025 點</span></div><p>同醫令、同施打明細或同一預定日的 QD 單次施打先去重；跨月醫令在各有執行的月份各計一筆保管。</p></div></Section></div>
           </>}
 
