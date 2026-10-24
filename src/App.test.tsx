@@ -149,6 +149,10 @@ describe('Excel import queue', () => {
       { target: { files: [new File(['g'], '1150908_OPAT個案資料g.xlsx')] } });
     fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
     await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
+    expect(screen.getByText('已完成注射次數').closest('.stat')?.querySelector('strong')?.textContent).toBe('2');
+    const overviewHeadings = [...container.querySelectorAll('section h2')].map(heading => heading.textContent);
+    expect(overviewHeadings.indexOf('醫令頻率')).toBeGreaterThan(overviewHeadings.indexOf('常用注射抗生素'));
+    expect(overviewHeadings.indexOf('醫令頻率')).toBeLessThan(overviewHeadings.indexOf('院區療程狀況'));
     const summary = screen.getByRole('heading', { name: '醫令頻率' }).closest('section')!;
     expect(within(summary).getByText('Q12H')).toBeTruthy();
     expect(within(summary).getByText('1 筆')).toBeTruthy();

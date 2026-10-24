@@ -427,7 +427,7 @@ export default function App() {
           {view === 'overview' && <>
             <div className="stats-grid overview-stats">
               {statLine(month === 'all' ? '新增療程總數' : '本期新增療程', number(newCases.length), COLORS[3], Users)}
-              {statLine('本期計分施打', number(total.nursing), COLORS[0], Activity)}
+              {statLine('已完成注射次數', number(total.nursing), COLORS[0], Activity)}
               {statLine('施打完成率', percentage(completionSummary?.doseRate ?? null), COLORS[2], Check)}
               {statLine('未完成施打', number(completionSummary?.missed || 0), COLORS[1], AlertTriangle)}
               {statLine('到期療程完成率', percentage(completionSummary?.courseRate ?? null), COLORS[4], ShieldCheck)}
@@ -435,9 +435,6 @@ export default function App() {
             <Section title="執行完成率" detail={`依檔名下載日 ${formatDate(data.snapshotDate)} 判定；僅統計截至 ${completion?.asOf || '—'} 的排程，中斷或轉診及資料不足者不列入分母。`}>
               <div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">預定施打</th><th className="numeric">已完成</th><th className="numeric">未完成</th><th>施打完成率</th><th className="numeric">到期療程</th><th className="numeric">完成療程</th><th>療程完成率</th></tr></thead><tbody>{completionByCampus.filter(row => campus === '全部院區' || row.name === campus).map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{number(row.expected)}</td><td className="numeric">{number(row.executed)}</td><td className="numeric">{number(row.missed)}</td><td><div className="rate-cell"><strong>{percentage(row.doseRate)}</strong><meter min="0" max="1" value={row.doseRate || 0} aria-label={`${row.name}施打完成率`} /></div></td><td className="numeric">{number(row.dueCourses)}</td><td className="numeric">{number(row.completedCourses)}</td><td><div className="rate-cell"><strong>{percentage(row.courseRate)}</strong><meter min="0" max="1" value={row.courseRate || 0} aria-label={`${row.name}療程完成率`} /></div></td></tr>)}</tbody></table></div>
               {(completionSummary?.interruptedCourses || completionSummary?.unknownCourses) ? <p className="method-note">另有中斷／轉診 {number(completionSummary?.interruptedCourses || 0)} 療程、排程資料不足 {number(completionSummary?.unknownCourses || 0)} 療程，未列入到期療程完成率。</p> : null}
-            </Section>
-            <Section title="醫令頻率" detail="去重後的注射抗生素醫令筆數；完整圖表與非 QD 逐筆紀錄見開立分析">
-              <FrequencySummary values={byFrequency} />
             </Section>
             <div className="two-column wide-left">
               <Section title={month === 'all' ? '每月預定與實際施打' : '每日預定與實際施打'} detail="單日單次醫令依預定日歸屬；截至資料快照前一天"><ComparisonChart values={comparison} /><p className="method-note">未對應排程：有施打明細，但同療程、同藥品、同歸屬日找不到可評估的預定施打；不代表一定多打。原始執行時間仍用於 08:00 績效切月。</p></Section>
@@ -456,6 +453,9 @@ export default function App() {
               <Section title="療程來源" detail="標示新開療程數及占比；D1 與 D2-D7 合併"><RankedBars values={bySource} axisWidth={75} /></Section>
               <Section title="常用注射抗生素" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} axisWidth={110} /></Section>
             </div>
+            <Section title="醫令頻率" detail="去重後的注射抗生素醫令筆數；完整圖表與非 QD 逐筆紀錄見開立分析">
+              <FrequencySummary values={byFrequency} />
+            </Section>
             <Section title="院區療程狀況" detail={`以 ${formatDate(data.snapshotDate)} 資料快照判定；失敗與轉診另外列示`}><div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">療程</th><th className="numeric">有執行</th><th className="numeric">未執行</th><th className="numeric">待施行</th><th className="numeric">失敗標記</th><th className="numeric">轉急診/住院</th></tr></thead><tbody>{branchStatus.map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{row.courses}</td><td className="numeric">{row.executed}</td><td className="numeric">{row.missed}</td><td className="numeric">{row.pending}</td><td className="numeric">{row.failed}</td><td className="numeric">{row.transferred}</td></tr>)}</tbody></table></div></Section>
             <div className="insight-row"><div><strong>{number(cases.filter(course => course.failed).length)}</strong><span>標記失敗個案</span></div><div><strong>{number(cases.filter(course => course.transferred).length)}</strong><span>轉急診 / 住院</span></div><div><strong>{number(cases.filter(course => course.accounts.length > 1).length)}</strong><span>合併的 D1 / D2 療程</span></div><div><strong>{number(selectedIssues.length)}</strong><span>待檢核項目</span></div><button onClick={() => switchView('audit')}>查看資料檢核 →</button></div>
           </>}
