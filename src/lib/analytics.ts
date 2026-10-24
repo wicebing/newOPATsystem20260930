@@ -112,6 +112,19 @@ export function hourlyByCampus(events: Execution[]): HourlyRow[] {
   return hours;
 }
 
+export function weekdayByCampus(events: Execution[]): HourlyRow[] {
+  const days = ['日', '一', '二', '三', '四', '五', '六'].map(day => ({
+    name: `週${day}`, 新竹: 0, 竹北: 0, 竹東: 0, total: 0,
+  }));
+  events.forEach(event => {
+    if (!CAMPUSES.includes(event.campus as KnownCampus)) return;
+    const item = days[event.time.getDay()];
+    item[event.campus as KnownCampus] += 1;
+    item.total += 1;
+  });
+  return days;
+}
+
 export interface PrescribedDrug {
   code: string;
   name: string;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyze } from './opat';
-import { executionTrend, hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weeklyOrders } from './analytics';
+import { executionTrend, hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weekdayByCampus, weeklyOrders } from './analytics';
 import type { RawRow } from './opat';
 
 const base: RawRow = {
@@ -65,6 +65,20 @@ describe('execution and prescribing analytics', () => {
     expect(hours).toHaveLength(24);
     expect(hours[9]).toMatchObject({ 新竹: 0, 竹北: 1, 竹東: 1, total: 2 });
     expect(hours[10]).toMatchObject({ 新竹: 1, 竹北: 0, 竹東: 0, total: 1 });
+  });
+
+  it('stacks weekday executions by campus using the actual execution time', () => {
+    const data = analyze([{ name: '1150804_OPAT個案資料g.xlsx', rows: [
+      row({}),
+      row({ 帳號: '26T70000002', 病歷號: 'G000002', 院區: '竹北', 執行次數明細: '2026/08/01 10:00' }),
+      row({ 帳號: '26T40000003', 病歷號: 'H000003', 院區: '新竹', 開始日: '20260802', 結束日: '20260802',
+        執行次數明細: '2026/08/02 07:00' }),
+    ] }]);
+    const days = weekdayByCampus(data.executions);
+    expect(days).toHaveLength(7);
+    expect(days[6]).toMatchObject({ name: '週六', 新竹: 0, 竹北: 1, 竹東: 1, total: 2 });
+    expect(days[0]).toMatchObject({ name: '週日', 新竹: 1, 竹北: 0, 竹東: 0, total: 1 });
+    expect(days.reduce((sum, day) => sum + day.total, 0)).toBe(data.executions.length);
   });
 
   it('uses distinct OPAT courses, not injection frequency, as each physician denominator', () => {
