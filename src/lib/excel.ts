@@ -57,9 +57,14 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
     來源列號: recordById.get(event.rowId)?.rowNumber || '',
   }));
   const legacyCleaned = analysis.records.filter(row => !row.duplicateOf && isSelectedAntibiotic(row.drugCode, row.kind, includedCodes) &&
-    (campus === '全部院區' || row.campus === campus) && (month === 'all' || row.times.some(time => reportingMonth(time) === month) ||
-      (row.startDate && formatDate(row.startDate).slice(0, 7) <= month && formatDate(row.endDate || row.startDate).slice(0, 7) >= month)))
-    .map(row => ({ ...row.raw, 院區: row.campus }));
+    (campus === '全部院區' || row.campus === campus)).flatMap(row => {
+    if (month === 'all') return [{ ...row.raw, 院區: row.campus }];
+    const selected = row.times.flatMap((time, index) => reportingMonth(time) === month ? [index] : []);
+    if (!selected.length) return [];
+    return [{ ...row.raw, 院區: row.campus, 執行次數: selected.length,
+      執行次數明細: selected.map(index => formatDate(row.times[index], true)).join(', '),
+      執行人員明細: selected.map(index => `${row.executors[index]?.id || ''}${row.executors[index]?.name || ''}`).join(', ') }];
+  });
   const legacyPerformance = selectedRows.map(row => ({ campus: row.campus, nursing: row.nursing, pharmacy: row.pharmacy, medicalAffairs: row.medicalAffairs }));
   const executors = groupExecutors(selectedEvents).map(person => ({
     院區: person.campus, 人員代碼: person.id, 執行人員: person.name,

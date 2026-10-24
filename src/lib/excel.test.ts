@@ -67,4 +67,36 @@ describe('Excel report', () => {
     expect(XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Step2原系統格式'])[0])
       .toMatchObject({ nursing: 1, pharmacy: 1 });
   });
+
+  it('cuts Step1 execution details at 08:00 rather than using scheduled order dates', () => {
+    const base = {
+      病歷號: 'G000001', 院區: '竹東', 診療行為: '門診轉OPAT「D1」',
+      藥品八碼: 'SIN1AB20', 組合商品名: 'Sintrix 500 mg/vial', 頻率: 'QD',
+      執行次數: 1, 執行人員明細: 'G00001王甲乙', '39029C管理費數量': 0,
+    };
+    const analysis = analyze([{ name: '1151001_OPAT個案資料g.xlsx', rows: [
+      { ...base, 帳號: 'TEST-01', 確認日期: '20260830', 開始日: '20260901', 結束日: '20260901',
+        執行次數明細: '2026/09/01 07:08' },
+      { ...base, 帳號: 'TEST-02', 病歷號: 'G000002', 確認日期: '20260823', 開始日: '20260905', 結束日: '20260905',
+        執行次數明細: '2026/08/24 09:02' },
+      { ...base, 帳號: 'TEST-03', 病歷號: 'G000003', 確認日期: '20260831', 開始日: '20260831', 結束日: '20260901',
+        頻率: 'Q12H', 執行次數: 3, 執行次數明細: '2026/08/31 09:00, 2026/09/01 07:59, 2026/09/01 08:00',
+        執行人員明細: 'G00001王甲乙, G00002李丙丁, G00003陳戊己' },
+    ] }]);
+    const included = new Set(['SIN1AB20']);
+    const workbook = (month: string) => createReportWorkbook(analysis, performance(analysis, month, included), month,
+      '竹東', included, buildCompletion(analysis, included, new Date(2026, 9, 1)));
+    const september = workbook('2026-09');
+    const septemberRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(september.Sheets['Step1清理資料']);
+    expect(septemberRows).toHaveLength(1);
+    expect(septemberRows[0]).toMatchObject({ 帳號: 'TEST-03', 執行次數: 1,
+      執行次數明細: '2026-09-01 08:00', 執行人員明細: 'G00003陳戊己' });
+    expect(XLSX.utils.sheet_to_json<Record<string, unknown>>(september.Sheets['Step2原系統格式'])[0])
+      .toMatchObject({ nursing: 1, pharmacy: 1 });
+
+    const augustRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook('2026-08').Sheets['Step1清理資料']);
+    expect(augustRows).toHaveLength(3);
+    expect(augustRows.find(row => row.帳號 === 'TEST-03')).toMatchObject({ 執行次數: 2,
+      執行次數明細: '2026-08-31 09:00, 2026-09-01 07:59', 執行人員明細: 'G00001王甲乙, G00002李丙丁' });
+  });
 });
