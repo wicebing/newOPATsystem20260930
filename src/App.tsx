@@ -19,6 +19,7 @@ import type { DailyComparison } from './lib/completion';
 import { executorKey, groupExecutors } from './lib/staff';
 import { executionTrend, hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrders, weeklyOrders } from './lib/analytics';
 import type { HourlyRow, WeeklyRow } from './lib/analytics';
+import hospitalLogo from './assets/ntuh_hch.png';
 
 type View = 'overview' | 'execution' | 'prescribing' | 'staff' | 'performance' | 'cases' | 'audit';
 const COLORS = ['#10b981', '#f9735b', '#0ea5e9', '#f59e0b', '#6366f1', '#ec4899'];
@@ -397,7 +398,7 @@ export default function App() {
   return <div className="app-shell">
     <input ref={fileInput} type="file" accept=".xlsx,.xls" multiple hidden onChange={onInput} />
     <aside className="sidebar">
-      <div className="brand"><span className="brand-mark"><Activity size={23} strokeWidth={2.3} /></span><span><strong>OPAT</strong><small>執行與績效分析</small></span></div>
+      <div className="brand"><img className="hospital-logo" src={hospitalLogo} alt="臺大醫院新竹臺大分院" /><span className="brand-copy"><strong>OPAT</strong><small>執行與績效分析</small></span></div>
       <nav aria-label="主要導覽">{NAV.map(item => {
         const Icon = item.icon;
         return <button key={item.id} className={`nav-item ${view === item.id ? 'active' : ''}`} onClick={() => switchView(item.id)}><Icon size={18} /><span>{item.label}</span></button>;
@@ -406,7 +407,7 @@ export default function App() {
     </aside>
 
     <main className="main">
-      <header className="topbar"><div className="mobile-brand"><Activity size={21} /> OPAT</div><span className="topbar-title">OPAT 執行與績效分析</span><div className="topbar-actions">
+      <header className="topbar"><div className="mobile-brand"><img className="hospital-logo" src={hospitalLogo} alt="臺大醫院新竹臺大分院" /><span>OPAT</span></div><span className="topbar-title">OPAT 執行與績效分析</span><div className="topbar-actions">
         {data && completion && <button className="button ghost export-button" aria-label="匯出 Excel 報表" title="匯出 Excel 報表" onClick={() => void import('./lib/excel').then(({ downloadReport }) => downloadReport(data, report, month, campus, includedCodes, completion))}><ArrowDownToLine size={17} /><span className="export-label">匯出 Excel 報表</span></button>}
         <button className="button primary" onClick={choose} disabled={busy}><Plus size={17} /> 新增 Excel</button>
       </div></header>

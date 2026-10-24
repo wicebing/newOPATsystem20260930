@@ -136,3 +136,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .stats-grid.overview-stats{grid-template-columns:repeat(5,minmax(0,1fr))}
 @media(max-width:1200px) and (min-width:801px){.stats-grid.overview-stats{grid-template-columns:repeat(6,minmax(0,1fr))}.overview-stats .stat{grid-column:span 2}.overview-stats .stat:nth-last-child(-n+2){grid-column:span 3}}
 @media(max-width:800px){.stats-grid.overview-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-stats .stat:last-child{grid-column:1/-1}}
+.hospital-logo{display:block;width:142px;height:81px;object-fit:contain;flex:none}
+.brand-copy{min-width:0}
+@media(max-width:1200px){.brand-copy{display:none}}
+@media(max-width:900px){.mobile-brand{gap:8px}.mobile-brand .hospital-logo{width:104px;height:60px}.mobile-brand span{font-size:18px;font-weight:800}}
+@media(max-width:530px){.mobile-brand span{display:none}}
