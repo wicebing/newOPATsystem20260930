@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, LabelList, Legend, Line, LineChart,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Line, LineChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import {
@@ -21,7 +21,7 @@ import { hourlyByCampus, nonQdOrders, prescribingMatrix, selectedAntibioticOrder
 import type { HourlyRow, WeeklyRow } from './lib/analytics';
 
 type View = 'overview' | 'execution' | 'prescribing' | 'staff' | 'performance' | 'cases' | 'audit';
-const COLORS = ['#07a884', '#f26750', '#4169eb', '#e3a12d', '#805de0', '#13a4c2'];
+const COLORS = ['#10b981', '#f9735b', '#0ea5e9', '#f59e0b', '#6366f1', '#ec4899'];
 const NAV: { id: View; label: string; icon: LucideIcon }[] = [
   { id: 'overview', label: '總覽', icon: LayoutDashboard },
   { id: 'execution', label: '執行分析', icon: Activity },
@@ -86,8 +86,8 @@ function ComparisonChart({ values }: { values: DailyComparison[] }) {
   return <Chart empty={!values.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={values} margin={{ top: 12, right: 8, left: -22, bottom: 0 }} barCategoryGap="25%"><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" minTickGap={20} tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} domain={[0, 'auto']} tick={{ fontSize: 11 }} /><Tooltip content={<ComparisonTooltip />} /><Legend /><Bar dataKey="完成" stackId="dose" fill={COLORS[0]} /><Bar dataKey="未完成" stackId="dose" fill={COLORS[1]} /><Bar dataKey="未對應排程" stackId="dose" fill={COLORS[2]} /></BarChart></ResponsiveContainer></Chart>;
 }
 
-function RankedBars({ values, color, axisWidth }: { values: { name: string; value: number; label: string }[]; color: string; axisWidth: number }) {
-  return <Chart empty={!values.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={values} layout="vertical" margin={{ top: 8, right: 92, left: 4, bottom: 8 }}><CartesianGrid stroke="#e8eded" horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={axisWidth} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="value" name="數量" fill={color} radius={[0, 3, 3, 0]}><LabelList dataKey="label" position="right" fill="#3e5651" fontSize={11} /></Bar></BarChart></ResponsiveContainer></Chart>;
+function RankedBars({ values, axisWidth }: { values: { name: string; value: number; label: string }[]; axisWidth: number }) {
+  return <Chart empty={!values.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={values} layout="vertical" margin={{ top: 8, right: 92, left: 4, bottom: 8 }}><CartesianGrid horizontal={false} /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={axisWidth} tick={{ fontSize: 11 }} /><Tooltip content={<TooltipContent />} /><Bar dataKey="value" name="數量" radius={[0, 4, 4, 0]}>{values.map((item, index) => <Cell key={`${item.name}-${index}`} fill={COLORS[index % COLORS.length]} />)}<LabelList dataKey="label" position="right" fill="#34465f" fontSize={12} /></Bar></BarChart></ResponsiveContainer></Chart>;
 }
 
 function HourlyTooltip({ active, payload, campus = '全部院區' }: { active?: boolean; payload?: { payload?: HourlyRow }[]; campus?: Campus | '全部院區' }) {
@@ -468,8 +468,8 @@ export default function App() {
               </Section>
             </div>
             <div className="two-column">
-              <Section title="療程來源" detail="標示新開療程數及占比；D1 與 D2-D7 合併"><RankedBars values={bySource} color={COLORS[1]} axisWidth={75} /></Section>
-              <Section title="常用注射抗生素" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} color={COLORS[0]} axisWidth={110} /></Section>
+              <Section title="療程來源" detail="標示新開療程數及占比；D1 與 D2-D7 合併"><RankedBars values={bySource} axisWidth={75} /></Section>
+              <Section title="常用注射抗生素" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} axisWidth={110} /></Section>
             </div>
             <Section title="院區療程狀況" detail={`以 ${formatDate(data.snapshotDate)} 資料快照判定；失敗與轉診另外列示`}><div className="table-scroll"><table><thead><tr><th>院區</th><th className="numeric">療程</th><th className="numeric">有執行</th><th className="numeric">未執行</th><th className="numeric">待施行</th><th className="numeric">失敗標記</th><th className="numeric">轉急診/住院</th></tr></thead><tbody>{branchStatus.map(row => <tr key={row.name}><td className="emph">{row.name}</td><td className="numeric">{row.courses}</td><td className="numeric">{row.executed}</td><td className="numeric">{row.missed}</td><td className="numeric">{row.pending}</td><td className="numeric">{row.failed}</td><td className="numeric">{row.transferred}</td></tr>)}</tbody></table></div></Section>
             <div className="insight-row"><div><strong>{number(cases.filter(course => course.failed).length)}</strong><span>標記失敗個案</span></div><div><strong>{number(cases.filter(course => course.transferred).length)}</strong><span>轉急診 / 住院</span></div><div><strong>{number(cases.filter(course => course.accounts.length > 1).length)}</strong><span>合併的 D1 / D2 療程</span></div><div><strong>{number(selectedIssues.length)}</strong><span>待檢核項目</span></div><button onClick={() => switchView('audit')}>查看資料檢核 →</button></div>
@@ -516,7 +516,7 @@ export default function App() {
               <Section title={month === 'all' ? '每月施打次數' : '每日施打次數'}><ExecutionTrend values={trend} campus={campus} empty={!events.length} /></Section>
               <Section title="施打時段" detail="實際時間，以整點分組；三院區堆疊並使用相同刻度各自比較"><HourlyDistribution values={hourly} campus={campus} empty={!events.length} /></Section>
             </div>
-            <Section title="藥品施打排行" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} color={COLORS[0]} axisWidth={110} /></Section>
+            <Section title="藥品施打排行" detail="施打次數及占本範圍全部注射抗生素施打比例"><RankedBars values={topDrugs} axisWidth={110} /></Section>
             <div className="two-column"><Section title="星期分布" detail="實際施打時間"><Chart empty={!events.length}><ResponsiveContainer width="100%" height="100%"><BarChart data={byWeekday} margin={{ top: 12, right: 10, left: -22, bottom: 0 }}><CartesianGrid stroke="#e8eded" vertical={false} /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey="次數" fill={COLORS[4]} radius={[3, 3, 0, 0]} /></BarChart></ResponsiveContainer></Chart></Section><Section title="各藥品預定施打完成" detail="排程日與實際施打時間比對"><div className="table-scroll"><table><thead><tr><th>藥品</th><th className="numeric">預定</th><th className="numeric">完成</th><th className="numeric">未完成</th><th>完成率</th></tr></thead><tbody>{completionByDrug.slice(0, 12).map(drug => <tr key={drug.code}><td title={drug.name}>{drug.name}</td><td className="numeric">{number(drug.expected)}</td><td className="numeric">{number(drug.executed)}</td><td className="numeric">{number(drug.expected - drug.executed)}</td><td className="emph">{percentage(drug.expected ? drug.executed / drug.expected : null)}</td></tr>)}</tbody></table></div></Section></div>
             <Section title="科別與醫師" detail="依施打次數排序"><div className="table-scroll"><table><thead><tr><th>科別</th><th>醫師</th><th className="numeric">療程數</th><th className="numeric">施打次數</th></tr></thead><tbody>{doctorStats.map((item, index) => <tr key={index}><td>{item.department}</td><td>{item.doctor}</td><td className="numeric">{number(item.cases.size)}</td><td className="numeric emph">{number(item.executions)}</td></tr>)}</tbody></table></div></Section>
             <Section title="施打紀錄" detail={`共 ${number(filteredEvents.length)} 次`} action={<div className="search"><Search size={16} /><input value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} placeholder="帳號、病歷號、藥品、醫師、人員" /></div>}><div className="table-scroll"><table><thead><tr><th>執行時間</th><th>施打歸屬日</th><th>績效月</th><th>院區</th><th>執行人員</th><th>人員代碼</th><th>帳號</th><th>病歷號</th><th>注射抗生素</th><th>頻率</th><th>來源列</th></tr></thead><tbody>{filteredEvents.slice((page - 1) * pageSize, page * pageSize).map(event => <tr key={event.id}><td className="nowrap">{formatDate(event.time, true)}</td><td className="nowrap">{event.attributedDate}</td><td>{event.month}</td><td>{event.campus}</td><td>{event.executorName || '未記錄'}</td><td className="mono">{event.executorId || '—'}</td><td className="mono">{event.account}</td><td className="mono">{event.chartNo}</td><td>{event.drugName}</td><td>{event.frequency}</td><td className="mono nowrap">{sourceReference(event.rowId)}</td></tr>)}</tbody></table></div><Pagination page={page} total={filteredEvents.length} size={pageSize} onChange={setPage} /></Section>
