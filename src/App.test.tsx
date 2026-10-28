@@ -201,4 +201,25 @@ describe('Excel import queue', () => {
     expect(within(orderSection).getByText('Sintrix 500 mg/vial')).toBeTruthy();
     expect(within(orderSection).getByText('Q12H')).toBeTruthy();
   });
+
+  it('uses completed scheduled injections, not nursing performance events, in the overview card', async () => {
+    reader.mockResolvedValueOnce([{ name: '1150908_OPAT個案資料g.xlsx', rows: [{
+      帳號: '26T70000031', 病歷號: 'G000031', 院區: '竹東',
+      診療行為: '門診轉OPAT「D1」', 組合商品名: 'Sintrix 500 mg/vial',
+      藥品八碼: 'SIN1AB20', 頻率: 'QD', 執行次數: 1,
+      執行次數明細: '2026/09/08 09:00', 確認日期: '20260908',
+      開始日: '20260908', 結束日: '20260908', '39029C管理費數量': 0,
+    }] }]);
+    const { container } = render(<App />);
+    fireEvent.change(container.querySelector('input[type="file"]') as HTMLInputElement,
+      { target: { files: [new File(['g'], '1150908_OPAT個案資料g.xlsx')] } });
+    fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
+    await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
+    expect(screen.getByText('已完成注射次數').closest('.stat')?.querySelector('strong')?.textContent).toBe('0');
+    const campusTable = screen.getByRole('table', { name: '依院區執行完成率' });
+    expect([...campusTable.querySelectorAll<HTMLTableRowElement>('tbody tr')]
+      .find(row => row.cells[0].textContent === '竹東')?.cells[3].textContent).toBe('0');
+    fireEvent.click(screen.getAllByRole('button', { name: '績效點數' })[0]);
+    expect(container.querySelector('.performance-table tfoot tr')?.children[3].textContent).toBe('1');
+  });
 });

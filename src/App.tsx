@@ -456,13 +456,13 @@ export default function App() {
           {view === 'overview' && <>
             <div className="stats-grid overview-stats">
               {statLine(month === 'all' ? '新增療程總數' : '本期新增療程', number(newCases.length), COLORS[3], Users)}
-              {statLine('已完成注射次數', number(total.nursing), COLORS[0], Activity)}
+              {statLine('已完成注射次數', number(completionSummary?.executed || 0), COLORS[0], Activity)}
               {statLine('施打完成率', percentage(completionSummary?.doseRate ?? null), COLORS[2], Check)}
               {statLine('未完成施打', number(completionSummary?.missed || 0), COLORS[1], AlertTriangle)}
               {statLine('到期療程完成率', percentage(completionSummary?.courseRate ?? null), COLORS[4], ShieldCheck)}
               {statLine('健保申報點數估算', number(totalNhiPoints), COLORS[5], Stethoscope)}
             </div>
-            <Section title="執行完成率" detail={`新增療程依開案月；施打依預定日、到期療程依最後預定日歸月。資料快照 ${formatDate(data.snapshotDate)}，僅統計截至 ${completion?.asOf || '—'} 的排程。`}>
+            <Section title="執行完成率" detail={`總覽的已完成注射次數與下表「已完成」相同。新增療程依開案月；施打依預定日、到期療程依最後預定日歸月。資料快照 ${formatDate(data.snapshotDate)}，僅統計截至 ${completion?.asOf || '—'} 的排程。`}>
               <CompletionBreakdownTable dimension="院區" rows={completionByCampus.filter(row => campus === '全部院區' || row.name === campus)} />
               <CompletionBreakdownTable dimension="療程來源" rows={completionBySource} />
               {(completionSummary?.interruptedCourses || completionSummary?.unknownCourses) ? <p className="method-note">另有中斷／轉診 {number(completionSummary?.interruptedCourses || 0)} 療程、排程資料不足 {number(completionSummary?.unknownCourses || 0)} 療程，未列入到期療程完成率。</p> : null}
