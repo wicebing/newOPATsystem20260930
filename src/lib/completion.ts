@@ -41,6 +41,7 @@ export interface CompletionReport {
 export interface CompletionSummary {
   expected: number;
   executed: number;
+  completedDays: number;
   missed: number;
   doseRate: number | null;
   dueCourses: number;
@@ -180,10 +181,20 @@ export function summarizeCompletion(report: CompletionReport, month = 'all', cam
     (campus === '全部院區' || course.campus === campus));
   const expected = days.reduce((sum, day) => sum + day.expected, 0);
   const executed = days.reduce((sum, day) => sum + day.executed, 0);
+  const chartByCourse = new Map(report.courses.map(course => [course.courseId, course.chartNo]));
+  const byPatientDate = new Map<string, { expected: number; executed: number }>();
+  days.forEach(day => {
+    const key = `${day.campus}|${chartByCourse.get(day.courseId) || day.courseId}|${day.date}`;
+    const current = byPatientDate.get(key) || { expected: 0, executed: 0 };
+    current.expected += day.expected;
+    current.executed += day.executed;
+    byPatientDate.set(key, current);
+  });
+  const completedDays = [...byPatientDate.values()].filter(day => day.executed >= day.expected).length;
   const dueCourses = courses.filter(course => course.status === '完成' || course.status === '未完成').length;
   const completedCourses = courses.filter(course => course.status === '完成').length;
   return {
-    expected, executed, missed: expected - executed,
+    expected, executed, completedDays, missed: expected - executed,
     doseRate: expected ? executed / expected : null,
     dueCourses, completedCourses, courseRate: dueCourses ? completedCourses / dueCourses : null,
     interruptedCourses: courses.filter(course => course.status === '中斷/轉診').length,

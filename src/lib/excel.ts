@@ -34,20 +34,25 @@ export function createReportWorkbook(analysis: Analysis, rows: PerformanceRow[],
   const courseById = new Map(analysis.courses.map(course => [course.id, course]));
   const progressById = new Map(completion.courses.map(course => [course.courseId, course]));
   const selectedRows = rows.filter(row => campus === '全部院區' || row.campus === campus);
-  const summary = selectedRows.map(row => ({
-    月份: month === 'all' ? '全部期間' : month,
-    院區: row.campus,
-    資料快照日: formatDate(analysis.snapshotDate),
-    原始施打明細: row.rawNursing,
-    排除重複或超頻: row.excludedNursing,
-    護理執行次數: row.nursing,
-    護理點數: row.nursingPoints,
-    藥劑保管筆數: row.pharmacy,
-    藥劑點數: row.pharmacyPoints,
-    管理費申報數: row.medicalAffairs,
-    醫事點數: row.medicalAffairsPoints,
-    總點數: row.totalPoints,
-  }));
+  const summary = selectedRows.map(row => {
+    const completedDays = summarizeCompletion(completion, month, row.campus).completedDays;
+    return {
+      月份: month === 'all' ? '全部期間' : month,
+      院區: row.campus,
+      資料快照日: formatDate(analysis.snapshotDate),
+      原始施打明細: row.rawNursing,
+      排除重複或超頻: row.excludedNursing,
+      護理執行次數: row.nursing,
+      已完成注射日: completedDays,
+      推估替代住院病床日: completedDays,
+      護理點數: row.nursingPoints,
+      藥劑保管筆數: row.pharmacy,
+      藥劑點數: row.pharmacyPoints,
+      管理費申報數: row.medicalAffairs,
+      醫事點數: row.medicalAffairsPoints,
+      總點數: row.totalPoints,
+    };
+  });
   const selectedNhi = nhiPoints(analysis, month).filter(row => campus === '全部院區' || row.campus === campus);
   const nhiSummary = [...selectedNhi, {
     campus: '合計', injectionOnce: selectedNhi.reduce((sum, row) => sum + row.injectionOnce, 0),

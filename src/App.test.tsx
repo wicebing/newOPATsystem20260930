@@ -189,6 +189,8 @@ describe('Excel import queue', () => {
     fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
     await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
     expect(screen.getByText('已完成注射次數').closest('.stat')?.querySelector('strong')?.textContent).toBe('2');
+    expect(screen.getByText('已完成注射日').closest('.stat')?.querySelector('strong')?.textContent).toBe('1');
+    expect(screen.getByText('推估替代住院病床日').closest('.stat')?.querySelector('strong')?.textContent).toBe('1');
     const overviewHeadings = [...container.querySelectorAll('section h2')].map(heading => heading.textContent);
     expect(overviewHeadings.indexOf('醫令頻率')).toBeGreaterThan(overviewHeadings.indexOf('常用注射抗生素'));
     expect(overviewHeadings.indexOf('醫令頻率')).toBeLessThan(overviewHeadings.indexOf('院區療程狀況'));
@@ -202,7 +204,7 @@ describe('Excel import queue', () => {
     expect(within(orderSection).getByText('Q12H')).toBeTruthy();
   });
 
-  it('uses completed scheduled injections, not nursing performance events, in the overview card', async () => {
+  it('shows nursing administrations and completed days separately in the overview', async () => {
     reader.mockResolvedValueOnce([{ name: '1150908_OPAT個案資料g.xlsx', rows: [{
       帳號: '26T70000031', 病歷號: 'G000031', 院區: '竹東',
       診療行為: '門診轉OPAT「D1」', 組合商品名: 'Sintrix 500 mg/vial',
@@ -215,7 +217,9 @@ describe('Excel import queue', () => {
       { target: { files: [new File(['g'], '1150908_OPAT個案資料g.xlsx')] } });
     fireEvent.click(screen.getByRole('button', { name: '開始分析' }));
     await screen.findByText(/已載入 1 筆原始資料、1 個療程/);
-    expect(screen.getByText('已完成注射次數').closest('.stat')?.querySelector('strong')?.textContent).toBe('0');
+    expect(screen.getByText('已完成注射次數').closest('.stat')?.querySelector('strong')?.textContent).toBe('1');
+    expect(screen.getByText('已完成注射日').closest('.stat')?.querySelector('strong')?.textContent).toBe('0');
+    expect(screen.getByText('推估替代住院病床日').closest('.stat')?.querySelector('strong')?.textContent).toBe('0');
     const campusTable = screen.getByRole('table', { name: '依院區執行完成率' });
     expect([...campusTable.querySelectorAll<HTMLTableRowElement>('tbody tr')]
       .find(row => row.cells[0].textContent === '竹東')?.cells[3].textContent).toBe('0');

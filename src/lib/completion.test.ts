@@ -63,7 +63,31 @@ describe('scheduled injection completion', () => {
     ] }]);
     const report = buildCompletion(data, included, today);
     expect(report.days).toHaveLength(1);
-    expect(summarizeCompletion(report)).toMatchObject({ expected: 2, executed: 2, doseRate: 1, completedCourses: 1 });
+    expect(summarizeCompletion(report)).toMatchObject({ expected: 2, executed: 2, completedDays: 1, doseRate: 1, completedCourses: 1 });
+  });
+
+  it('counts one completed course-day only when every prescribed injection was given', () => {
+    const data = analyze([{ name: 'sample-g.xlsx', rows: [
+      row({ 開始日: '20260723', 結束日: '20260723', 頻率: 'Q12H', 執行次數: 2,
+        執行次數明細: '2026/07/23 09:00, 2026/07/23 21:00' }),
+      row({ 開始日: '20260723', 結束日: '20260723', 藥品八碼: 'ABC1AB20', 組合商品名: 'Antibiotic B 1 g/vial',
+        執行次數明細: '2026/07/23 10:00' }),
+      row({ 帳號: '26T70000002', 病歷號: 'G000002', 開始日: '20260723', 結束日: '20260723',
+        頻率: 'Q12H', 執行次數明細: '2026/07/23 09:00' }),
+      row({ 帳號: '26T70000003', 病歷號: 'G000003', 開始日: '20260723', 結束日: '20260723',
+        執行次數明細: '2026/07/23 09:00' }),
+      row({ 帳號: '26T70000004', 病歷號: 'G000004', 開始日: '20260725', 結束日: '20260725',
+        執行次數明細: '2026/07/25 09:00' }),
+      row({ 帳號: '26T70000005', 病歷號: 'G000001', 診療行為: '住院轉OPAT',
+        開始日: '20260723', 結束日: '20260723', 執行次數明細: '2026/07/23 11:00' }),
+    ] }]);
+    const report = buildCompletion(data, new Set(['SIN1AB20', 'ABC1AB20']), today);
+    expect(summarizeCompletion(report, '2026-07', '竹東')).toMatchObject({
+      expected: 7, executed: 6, completedDays: 2,
+    });
+    const oneCourse = new Set(data.courses.filter(course => course.chartNo === 'G000001').map(course => course.id));
+    expect(summarizeCompletion(report, '2026-07', '竹東', oneCourse).completedDays).toBe(1);
+    expect(summarizeCompletion(report, '2026-08', '竹東').completedDays).toBe(0);
   });
 
   it('credits distinct single-day orders to their scheduled days when a timestamp is mistyped', () => {

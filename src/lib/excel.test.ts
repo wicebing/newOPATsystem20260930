@@ -30,7 +30,8 @@ describe('Excel report', () => {
     const legacyPerformance = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['Step2原系統格式']);
     expect(legacyPerformance[0]).toEqual({ campus: '竹東', nursing: 1, pharmacy: 1, medicalAffairs: 1 });
     const summary = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['績效總表']);
-    expect(summary[0]).toMatchObject({ 資料快照日: '2026-07-25', 原始施打明細: 1, 排除重複或超頻: 0 });
+    expect(summary[0]).toMatchObject({ 資料快照日: '2026-07-25', 原始施打明細: 1, 排除重複或超頻: 0,
+      已完成注射日: 1, 推估替代住院病床日: 1 });
     const nhi = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['健保申報點數']);
     expect(nhi[0]).toMatchObject({ 院區: '竹東', '39027C數量': 2, '39027C點數': 2062,
       '39029C數量': 1, '39029C點數': 500, 合計點數: 2562 });
